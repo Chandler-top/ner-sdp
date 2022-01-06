@@ -11,10 +11,26 @@ from module.linear_encoder import LinearEncoder
 from embedder.transformers_embedder import TransformersEmbedder
 from typing import Tuple
 from overrides import overrides
+import torch.nn.functional as F
 
 from data_utils import START_TAG, STOP_TAG, PAD
 
 from module.biaffine import *
+
+def pad_sequence(xs, length=None, padding=-1, dtype=np.float64):
+    lengths = [len(x) for x in xs]
+    if length is None:
+        length = max(lengths)
+    y = np.array([np.pad(x.astype(dtype), (0, length - l),
+                         mode="constant", constant_values=padding)
+                  for x, l in zip(xs, lengths)])
+    return torch.from_numpy(y)
+
+def _model_var(model, x):
+    p = next(filter(lambda p: p.requires_grad, model.parameters()))
+    if p.is_cuda:
+        x = x.cuda(p.get_device())
+    return torch.autograd.Variable(x)
 
 class TransformersCRF(nn.Module):
 
@@ -35,22 +51,22 @@ class TransformersCRF(nn.Module):
         # # self._activation = nn.LeakyReLU(0.1)
         #
         # self.mlp_arc_dep = NonLinear(
-        #     input_size=2 * config.lstm_hiddens,
-        #     hidden_size=config.mlp_arc_size + config.mlp_rel_size,
+        #     input_size=2 * config.hidden_dim,
+        #     hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
         #     activation=nn.LeakyReLU(0.1))
         # self.mlp_arc_head = NonLinear(
-        #     input_size=2 * config.lstm_hiddens,
-        #     hidden_size=config.mlp_arc_size + config.mlp_rel_size,
+        #     input_size=2 * config.hidden_dim,
+        #     hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
         #     activation=nn.LeakyReLU(0.1))
         #
-        # self.total_num = int((config.mlp_arc_size + config.mlp_rel_size) / 100)
-        # self.arc_num = int(config.mlp_arc_size / 100)
-        # self.rel_num = int(config.mlp_rel_size / 100)
+        # self.total_num = int((config.arc_hidden_dim + config.rel_hidden_dim) / 100)
+        # self.arc_num = int(config.arc_hidden_dim / 100)
+        # self.rel_num = int(config.rel_hidden_dim / 100)
         #
-        # self.arc_biaffine = Biaffine(config.mlp_arc_size, config.mlp_arc_size, \
+        # self.arc_biaffine = Biaffine(config.arc_hidden_dim, config.arc_hidden_dim, \
         #                              1, bias=(True, False))
-        # self.rel_biaffine = Biaffine(config.mlp_rel_size, config.mlp_rel_size, \
-        #                              vocab.rel_size, bias=(True, True))
+        # self.rel_biaffine = Biaffine(config.rel_hidden_dim, config.rel_hidden_dim, \
+        #                              config.rel_size, bias=(True, True))
 
         # else:
         self.linencoder = LinearEncoder(label_size=config.label_size, hidden_dim=config.hidden_dim)
@@ -83,10 +99,11 @@ class TransformersCRF(nn.Module):
         # 2022-01-06
         # lstm_scores = self.encoder(word_rep, word_seq_lens)
         lstm_feature, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
+        self.lstm_enc_hidden = lstm_feature
         lstm_scores = self.linencoder(word_rep, word_seq_lens, lstm_feature, recover_idx)
         # sdp-2022-01-04
-        # x_all_dep = self.mlp_arc_dep(outputs)
-        # x_all_head = self.mlp_arc_head(outputs)
+        # x_all_dep = self.mlp_arc_dep(lstm_feature)
+        # x_all_head = self.mlp_arc_head(lstm_feature)
         #
         # x_all_dep = drop_sequence_sharedmask(x_all_dep, self.dropout_mlp)
         # x_all_head = drop_sequence_sharedmask(x_all_head, self.dropout_mlp)
@@ -103,8 +120,10 @@ class TransformersCRF(nn.Module):
         # x_rel_dep = torch.cat(x_all_dep_splits[self.arc_num:], dim=2)
         # x_rel_head = torch.cat(x_all_head_splits[self.arc_num:], dim=2)
         #
-        # rel_logit_cond = self.rel_biaffine(x_rel_dep, x_rel_head)
-        # return arc_logit, rel_logit_cond
+        # rel_logit = self.rel_biaffine(x_rel_dep, x_rel_head)
+        # cache
+        # self.arc_logits = arc_logits
+        # self.rel_logits = rel_logits
 
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
@@ -130,3 +149,71 @@ class TransformersCRF(nn.Module):
         features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
         bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
         return bestScores, decodeIdx
+
+    def compute_sdp_loss(self, true_arcs, true_rels, lengths):
+        b, l1, l2 = self.arc_logits.size()
+        index_true_arcs = _model_var(
+            self.model,
+            pad_sequence(true_arcs, length=l1, padding=0, dtype=np.int64))
+        true_arcs = _model_var(
+            self.model,
+            pad_sequence(true_arcs, length=l1, padding=-1, dtype=np.int64))
+
+        masks = []
+        for length in lengths:
+            mask = torch.FloatTensor([0] * length + [-10000] * (l2 - length))
+            mask = _model_var(self.model, mask)
+            mask = torch.unsqueeze(mask, dim=1).expand(-1, l1)
+            masks.append(mask.transpose(0, 1))
+        length_mask = torch.stack(masks, 0)
+        arc_logits = self.arc_logits + length_mask
+
+        arc_loss = F.cross_entropy(
+            arc_logits.view(b * l1, l2), true_arcs.view(b * l1),
+            ignore_index=-1)
+
+        size = self.rel_logits.size()
+        output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
+
+        for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
+            rel_probs = []
+            for i in range(l1):
+                rel_probs.append(logits[i][int(arcs[i])])
+            rel_probs = torch.stack(rel_probs, dim=0)
+            output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
+
+        b, l1, d = output_logits.size()
+        true_rels = _model_var(self.model, pad_sequence(true_rels, padding=-1, dtype=np.int64))
+
+        rel_loss = F.cross_entropy(
+            output_logits.view(b * l1, d), true_rels.view(b * l1), ignore_index=-1)
+
+        loss = arc_loss + rel_loss
+
+        return loss
+
+    def compute_sdp_accuracy(self, true_arcs, true_rels):
+        b, l1, l2 = self.arc_logits.size()
+        pred_arcs = self.arc_logits.data.max(2)[1].cpu()
+        index_true_arcs = pad_sequence(true_arcs, padding=-1, dtype=np.int64)
+        true_arcs = pad_sequence(true_arcs, padding=-1, dtype=np.int64)
+        arc_correct = pred_arcs.eq(true_arcs).cpu().sum()
+
+
+        size = self.rel_logits.size()
+        output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
+
+        for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
+            rel_probs = []
+            for i in range(l1):
+                rel_probs.append(logits[i][arcs[i]])
+            rel_probs = torch.stack(rel_probs, dim=0)
+            output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
+
+        pred_rels = output_logits.data.max(2)[1].cpu()
+        true_rels = pad_sequence(true_rels, padding=-1, dtype=np.int64)
+        label_correct = pred_rels.eq(true_rels).cpu().sum()
+
+        total_arcs = b * l1 - np.sum(true_arcs.cpu().numpy() == -1)
+
+        return arc_correct, label_correct, total_arcs

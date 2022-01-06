@@ -44,10 +44,10 @@ class Config:
         self.charlstm_hidden_dim = 50
         self.use_char_rnn = args.use_char_rnn if "use_char_rnn" in args.__dict__ else None
         # SDP parts
-        self.arc_hidden = args.mlp_arc_size
-        self.lab_hidden = args.mlp_lab_size
+        self.arc_hidden_dim = args.mlp_arc_size
+        self.rel_hidden_dim = args.mlp_lab_size
         self.dropout_mlp_hidden = args.dropout_mlp_hidden
-        self.lab_size = len(['<pad>', 'root'])
+        self.rel_size = len(['<pad>', 'root'])
 
         self.embedder_type = args.embedder_type if "embedder_type" in args.__dict__ else None
         self.parallel_embedder = args.parallel_embedder if "parallel_embedder" in args.__dict__ else None
