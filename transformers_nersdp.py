@@ -45,33 +45,30 @@ class TransformersCRF(nn.Module):
             self.lstmencoder = BiLSTMEncoder(label_size=config.label_size, input_dim=self.embedder.get_output_dim(),
                                          hidden_dim=config.hidden_dim, drop_lstm=config.dropout)
 
-        # # MLPs layer
+        # MLPs layer
         # self._activation = nn.ReLU()
-        # # self._activation = nn.ELU()
-        # # self._activation = nn.LeakyReLU(0.1)
-        #
-        # self.mlp_arc_dep = NonLinear(
-        #     input_size=2 * config.hidden_dim,
-        #     hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
-        #     activation=nn.LeakyReLU(0.1))
-        # self.mlp_arc_head = NonLinear(
-        #     input_size=2 * config.hidden_dim,
-        #     hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
-        #     activation=nn.LeakyReLU(0.1))
-        #
-        # self.total_num = int((config.arc_hidden_dim + config.rel_hidden_dim) / 100)
-        # self.arc_num = int(config.arc_hidden_dim / 100)
-        # self.rel_num = int(config.rel_hidden_dim / 100)
-        #
-        # self.arc_biaffine = Biaffine(config.arc_hidden_dim, config.arc_hidden_dim, \
-        #                              1, bias=(True, False))
-        # self.rel_biaffine = Biaffine(config.rel_hidden_dim, config.rel_hidden_dim, \
-        #                              config.rel_size, bias=(True, True))
+        # self._activation = nn.ELU()
+        # self._activation = nn.LeakyReLU(0.1)
 
-        # else:
+        self.mlp_arc_dep = NonLinear(
+            input_size=2 * config.hidden_dim,
+            hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
+            activation=nn.LeakyReLU(0.1))
+        self.mlp_arc_head = NonLinear(
+            input_size=2 * config.hidden_dim,
+            hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
+            activation=nn.LeakyReLU(0.1))
+
+        self.total_num = int((config.arc_hidden_dim + config.rel_hidden_dim) / 100)
+        self.arc_num = int(config.arc_hidden_dim / 100)
+        self.rel_num = int(config.rel_hidden_dim / 100)
+
+        self.arc_biaffine = Biaffine(config.arc_hidden_dim, config.arc_hidden_dim, \
+                                     1, bias=(True, False))
+        self.rel_biaffine = Biaffine(config.rel_hidden_dim, config.rel_hidden_dim, \
+                                     config.rel_size, bias=(True, True))
+
         self.linencoder = LinearEncoder(label_size=config.label_size, hidden_dim=config.hidden_dim)
-
-
 
         # CRF
         self.inferencer = LinearCRF(label_size=config.label_size, label2idx=config.label2idx, add_iobes_constraint=config.add_iobes_constraint,
