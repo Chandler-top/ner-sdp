@@ -133,6 +133,7 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
         model.train()
         for iter, batch in tqdm(enumerate(train_loader, 1), desc="--training batch", total=len(train_loader)):
             optimizer.zero_grad()
+            # 统一的loss 输出，同时这个地方要把heads，rels传输去做预测和损失计算
             loss = model(words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device), input_mask = batch.attention_mask.to(config.device),
                     labels = batch.label_ids.to(config.device))
