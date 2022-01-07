@@ -32,6 +32,17 @@ def _model_var(model, x):
         x = x.cuda(p.get_device())
     return torch.autograd.Variable(x)
 
+def drop_sequence_sharedmask(inputs, dropout, batch_first=True):
+    if batch_first:
+        inputs = inputs.transpose(0, 1)
+    seq_length, batch_size, hidden_size = inputs.size()
+    drop_masks = inputs.data.new(batch_size, hidden_size).fill_(1 - dropout)
+    drop_masks = Variable(torch.bernoulli(drop_masks), requires_grad=False)
+    drop_masks = drop_masks / (1 - dropout)
+    drop_masks = torch.unsqueeze(drop_masks, dim=2).expand(-1, -1, seq_length).permute(2, 0, 1)
+    inputs = inputs * drop_masks
+    return inputs.transpose(1, 0)
+
 class TransformersCRF(nn.Module):
 
     def __init__(self, config):
@@ -48,25 +59,27 @@ class TransformersCRF(nn.Module):
         # MLPs layer
         # self._activation = nn.ReLU()
         # self._activation = nn.ELU()
-        # self._activation = nn.LeakyReLU(0.1)
+        self._activation = nn.LeakyReLU(0.1)
+        self.mlp_arc = NonlinearMLP(in_feature=config.hidden_dim,
+                                    out_feature=config.arc_hidden_dim * 2,
+                                    # out_feature=config.arc_hidden_dim + config.rel_hidden_dim
+                                    activation=self._activation)
+        self.mlp_lbl = NonlinearMLP(in_feature=config.hidden_dim,
+                                    out_feature=config.rel_hidden_dim * 2,
+                                    # out_feature=config.mlp_arc_size+config.mlp_rel_size
+                                    activation=self._activation)
 
-        self.mlp_arc_dep = NonLinear(
-            input_size=2 * config.hidden_dim,
-            hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
-            activation=nn.LeakyReLU(0.1))
-        self.mlp_arc_head = NonLinear(
-            input_size=2 * config.hidden_dim,
-            hidden_size=config.arc_hidden_dim + config.rel_hidden_dim,
-            activation=nn.LeakyReLU(0.1))
-
-        self.total_num = int((config.arc_hidden_dim + config.rel_hidden_dim) / 100)
-        self.arc_num = int(config.arc_hidden_dim / 100)
-        self.rel_num = int(config.rel_hidden_dim / 100)
-
-        self.arc_biaffine = Biaffine(config.arc_hidden_dim, config.arc_hidden_dim, \
+        self.arc_biaffine = Biaffine(config.arc_hidden_dim,
                                      1, bias=(True, False))
-        self.rel_biaffine = Biaffine(config.rel_hidden_dim, config.rel_hidden_dim, \
-                                     config.rel_size, bias=(True, True))
+
+        self.label_biaffine = Biaffine(config.rel_hidden_dim,
+                                       config.rel_size, bias=(True, True))
+
+        # self.word_fc = nn.Linear(args.wd_embed_dim, args.wd_embed_dim)
+        # self.tag_fc = nn.Linear(args.tag_embed_dim, args.tag_embed_dim)
+        # self.word_norm = nn.LayerNorm(args.wd_embed_dim)
+        # self.tag_norm = nn.LayerNorm(args.tag_embed_dim)
+        # self.reset_parameters()
 
         self.linencoder = LinearEncoder(label_size=config.label_size, hidden_dim=config.hidden_dim)
 
@@ -99,29 +112,27 @@ class TransformersCRF(nn.Module):
         self.lstm_enc_hidden = lstm_feature
         lstm_scores = self.linencoder(word_rep, word_seq_lens, lstm_feature, recover_idx)
         # sdp-2022-01-04
-        # x_all_dep = self.mlp_arc_dep(lstm_feature)
-        # x_all_head = self.mlp_arc_head(lstm_feature)
-        #
-        # x_all_dep = drop_sequence_sharedmask(x_all_dep, self.dropout_mlp)
-        # x_all_head = drop_sequence_sharedmask(x_all_head, self.dropout_mlp)
-        #
-        # x_all_dep_splits = torch.split(x_all_dep, split_size=100, dim=2)
-        # x_all_head_splits = torch.split(x_all_head, split_size=100, dim=2)
-        #
-        # x_arc_dep = torch.cat(x_all_dep_splits[:self.arc_num], dim=2)
-        # x_arc_head = torch.cat(x_all_head_splits[:self.arc_num], dim=2)
-        #
-        # arc_logit = self.arc_biaffine(x_arc_dep, x_arc_head)
-        # arc_logit = torch.squeeze(arc_logit, dim=3)
-        #
-        # x_rel_dep = torch.cat(x_all_dep_splits[self.arc_num:], dim=2)
-        # x_rel_head = torch.cat(x_all_head_splits[self.arc_num:], dim=2)
-        #
-        # rel_logit = self.rel_biaffine(x_rel_dep, x_rel_head)
-        # cache
-        # self.arc_logits = arc_logits
-        # self.rel_logits = rel_logits
+        # enc dropout 已经有了所以屏蔽了，后面根据效果确定是否打开
+        # if self.training:
+        #     enc_out = timestep_dropout(lstm_feature, config.dropout)
 
+        arc_feat = self.mlp_arc(lstm_feature)
+        lbl_feat = self.mlp_lbl(lstm_feature)
+        arc_head, arc_dep = arc_feat.chunk(2, dim=-1)
+        lbl_head, lbl_dep = lbl_feat.chunk(2, dim=-1)
+
+        if self.training:
+            arc_head = timestep_dropout(arc_head, self.dropout_mlp)
+            arc_dep = timestep_dropout(arc_dep, self.dropout_mlp)
+        arc_score = self.arc_biaffine(arc_dep, arc_head).squeeze(-1)
+
+        if self.training:
+            lbl_head = timestep_dropout(lbl_head, self.dropout_mlp)
+            lbl_dep = timestep_dropout(lbl_dep, self.dropout_mlp)
+        lbl_score = self.label_biaffine(lbl_dep, lbl_head)
+
+        # return arc_score, lbl_score
+        # crf
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
         dev_num = word_rep.get_device()
@@ -146,6 +157,10 @@ class TransformersCRF(nn.Module):
         features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
         bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
         return bestScores, decodeIdx
+
+    # def reset_parameters(self):
+    #     nn.init.xavier_uniform_(self.embedder.weight)
+    #     nn.init.xavier_uniform_(self.embedder.weight)
 
     def compute_sdp_loss(self, true_arcs, true_rels, lengths):
         b, l1, l2 = self.arc_logits.size()

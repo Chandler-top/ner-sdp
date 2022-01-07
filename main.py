@@ -241,7 +241,7 @@ def main():
                                              label2idx=train_dataset.label2idx, is_train=False)
         test_dataset = TransformersNERDataset(conf.test_file, tokenizer, number=conf.test_num,
                                               label2idx=train_dataset.label2idx, is_train=False)
-        num_workers = 8
+        num_workers = 0
         conf.label_size = len(train_dataset.label2idx)
 
 
