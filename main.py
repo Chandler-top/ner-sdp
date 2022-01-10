@@ -232,15 +232,18 @@ def main():
         print(colored(f"[Data Info] Tokenizing the instances using '{conf.embedder_type}' tokenizer", "blue"))
         tokenizer = context_models[conf.embedder_type]["tokenizer"].from_pretrained(conf.embedder_type, add_prefix_space=True)
         print(colored(f"[Data Info] Reading dataset from: \n{conf.train_file}\n{conf.dev_file}\n{conf.test_file}", "blue"))
-        train_dataset = TransformersNERDataset(conf.train_file, tokenizer, number=conf.train_num, is_train=True)
+        train_dataset = TransformersNERDataset(conf.train_file, tokenizer, number=conf.train_num,
+                                               is_train=True)
         conf.label2idx = train_dataset.label2idx
         conf.idx2labels = train_dataset.idx2labels
-        conf.lab_size = len(train_dataset.synlabel2idx)
+        conf.lab_size = len(train_dataset.syndep_label2idx)
 
         dev_dataset = TransformersNERDataset(conf.dev_file, tokenizer, number=conf.dev_num,
-                                             label2idx=train_dataset.label2idx, is_train=False)
+                                             label2idx=train_dataset.label2idx, syndep_label2idx=train_dataset.syndep_label2idx,
+                                             is_train=False)
         test_dataset = TransformersNERDataset(conf.test_file, tokenizer, number=conf.test_num,
-                                              label2idx=train_dataset.label2idx, is_train=False)
+                                              label2idx=train_dataset.label2idx, syndep_label2idx=train_dataset.syndep_label2idx,
+                                              is_train=False)
         num_workers = 0
         conf.label_size = len(train_dataset.label2idx)
 

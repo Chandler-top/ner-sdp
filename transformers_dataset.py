@@ -7,18 +7,20 @@ from typing import List, Dict
 from torch.utils.data import Dataset
 from torch.utils.data._utils.collate import default_collate
 from transformers import PreTrainedTokenizerFast
-import collections
+from collections import namedtuple
 import numpy as np
 from data_utils import convert_iobes, build_label_idx, check_all_labels_in_dict, build_deplabel_idx
 
 from instance import Instance
 
-Feature = collections.namedtuple('Feature', 'input_ids attention_mask token_type_ids orig_to_tok_index word_seq_len label_ids')
-Feature.__new__.__defaults__ = (None,) * 6
-
+# Feature = collections.namedtuple('Feature', 'input_ids attention_mask token_type_ids orig_to_tok_index word_seq_len label_ids')
+Feature = namedtuple('Feature', 'input_ids attention_mask token_type_ids orig_to_tok_index word_seq_len synhead_ids synlabel_ids label_ids')
+# Feature.__new__.__defaults__ = (None,) * 6
+Feature.__new__.__defaults__ = (None,) * 8
 
 def convert_instances_to_feature_tensors(instances: List[Instance],
                                          tokenizer: PreTrainedTokenizerFast,
+                                         syndep_label2idx: Dict[str, int],
                                          label2idx: Dict[str, int]) -> List[Feature]:
     features = []
     ## tokenize the word into word_piece / BPE
@@ -49,6 +51,10 @@ def convert_instances_to_feature_tensors(instances: List[Instance],
         assert len(orig_to_tok_index) == len(words)
         labels = inst.labels
         label_ids = [label2idx[label] for label in labels] if labels else [-100] * len(words)
+        # 2022-01-09-syn-dep
+        syndep_labels = inst.syndep_labels
+        syndep_label_ids = [syndep_label2idx[syndep_label] for syndep_label in syndep_labels] if syndep_labels else[-100] * len(words)
+        synhead_ids = inst.synheads
         segment_ids = [0] * len(res["input_ids"])
 
         features.append(Feature(input_ids=res["input_ids"],
@@ -56,6 +62,8 @@ def convert_instances_to_feature_tensors(instances: List[Instance],
                                 orig_to_tok_index=orig_to_tok_index,
                                 token_type_ids=segment_ids,
                                 word_seq_len=len(orig_to_tok_index),
+                                synhead_ids=synhead_ids,
+                                synlabel_ids=syndep_label_ids,
                                 label_ids=label_ids))
     return features
 
@@ -67,7 +75,7 @@ class TransformersNERDataset(Dataset):
                  is_train: bool,
                  sents: List[List[str]] = None,
                  label2idx: Dict[str, int] = None,
-                 synlabel2idx: Dict[str, int]  = None,
+                 syndep_label2idx: Dict[str, int]  = None,
                  number: int = -1,
                  ):
         """
@@ -94,13 +102,14 @@ class TransformersNERDataset(Dataset):
                 idx2labels, label2idx = build_label_idx(insts)
                 self.idx2labels = idx2labels
                 self.label2idx = label2idx
-                synlabel2idx, root_dep_label_id = build_deplabel_idx(insts)
-                self.synlabel2idx = synlabel2idx
+                syndep_label2idx, root_dep_label_id = build_deplabel_idx(insts)
+                self.syndep_label2idx = syndep_label2idx
         else:
             assert label2idx is not None ## for dev/test dataset we don't build label2idx
             self.label2idx = label2idx
+            self.syndep_label2idx = syndep_label2idx
             # check_all_labels_in_dict(insts=insts, label2idx=self.label2idx)
-        self.insts_ids = convert_instances_to_feature_tensors(insts, tokenizer, label2idx)
+        self.insts_ids = convert_instances_to_feature_tensors(insts, tokenizer, syndep_label2idx, label2idx)
         self.tokenizer = tokenizer
 
     def read_from_sentences(self, sents: List[List[str]]):
