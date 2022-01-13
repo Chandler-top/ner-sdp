@@ -123,17 +123,33 @@ def check_all_obj_is_None(objs):
 def build_deplabel_idx(insts: List[Instance]) -> Tuple[Dict[str, int], int]:
 	deplabel2idx = {}
 	deplabels = []
-	deplabel2idx[PAD] = len(deplabel2idx)
-	deplabels.append(PAD)
+	root = ''
+	# deplabel2idx[PAD] = len(deplabel2idx)
+	# deplabels.append(PAD)
 
 	# if self_label not in deplabel2idx:
 	# 	deplabels.append(self_label)
 	# 	deplabel2idx[self_label] = len(deplabel2idx)
 	for inst in insts:
-		for label in inst.syndep_labels:
-			if label not in deplabels:
-				deplabels.append(label)
-				deplabel2idx[label] = len(deplabel2idx)
+		idx = 0
+		for synhead, syndep_label in zip(inst.synheads,inst.syndep_labels):
+			if synhead != 0:
+				if syndep_label not in deplabels:
+					deplabels.append(syndep_label)
+					deplabel2idx[syndep_label] = len(deplabel2idx)
+			elif root == '':
+				root = syndep_label
+				deplabels.append(syndep_label)
+				deplabel2idx[syndep_label] = len(deplabel2idx)
+			elif root != syndep_label:
+				print('root = ' + root + ', rel for root = ' + syndep_label)
+				inst.syndep_labels[idx] = root
+			idx += 1
+
+		# for label in inst.syndep_labels:
+		# 	if label not in deplabels:
+		# 		deplabels.append(label)
+		# 		deplabel2idx[label] = len(deplabel2idx)
 	root_dep_label_id = deplabel2idx[root_dep_label]
 
 	print("#dep labels: {}".format(len(deplabels)))
