@@ -190,7 +190,7 @@ class TransformersNERDataset(Dataset):
                 tags.append(pos)
                 if synhead == 0 and find_root:
                     raise err("already have a root")
-                synheads.append(synhead - 1) ## because of 0-indexed.
+                synheads.append(synhead) ## because of 0-indexed. 现在直接读词的序号，不减1
                 syndeps.append(syndep)
                 labels.append(label)
         print("number of sentences: {}".format(len(insts)))
@@ -214,12 +214,16 @@ class TransformersNERDataset(Dataset):
             type_ids = feature.token_type_ids + [self.tokenizer.pad_token_type_id] * padding_length
             padding_word_len = max_seq_len - len(feature.orig_to_tok_index)
             orig_to_tok_index = feature.orig_to_tok_index + [0] * padding_word_len
+            synhead_ids = feature.synhead_ids + [-1] * padding_word_len
+            synlabel_ids = feature.synlabel_ids + [-1] * padding_word_len
             label_ids = feature.label_ids + [0] * padding_word_len
 
             batch[i] = Feature(input_ids=np.asarray(input_ids),
                                attention_mask=np.asarray(mask), token_type_ids=np.asarray(type_ids),
                                orig_to_tok_index=np.asarray(orig_to_tok_index),
                                word_seq_len =feature.word_seq_len,
+                               synhead_ids=np.asarray(synhead_ids),
+                               synlabel_ids=np.asarray(synlabel_ids),
                                label_ids=np.asarray(label_ids))
         results = Feature(*(default_collate(samples) for samples in zip(*batch)))
         return results

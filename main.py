@@ -136,6 +136,7 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             # 统一的loss 输出，同时这个地方要把heads，rels传输去做预测和损失计算
             loss = model(words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device), input_mask = batch.attention_mask.to(config.device),
+                    synhead_ids = batch.synhead_ids, synlabel_ids = batch.synlabel_ids,
                     labels = batch.label_ids.to(config.device))
             epoch_loss += loss.item()
             loss.backward()
@@ -237,6 +238,7 @@ def main():
         conf.label2idx = train_dataset.label2idx
         conf.idx2labels = train_dataset.idx2labels
         conf.lab_size = len(train_dataset.syndep_label2idx)
+        conf.rel_size = len(train_dataset.syndep_label2idx)
 
         dev_dataset = TransformersNERDataset(conf.dev_file, tokenizer, number=conf.dev_num,
                                              label2idx=train_dataset.label2idx, syndep_label2idx=train_dataset.syndep_label2idx,

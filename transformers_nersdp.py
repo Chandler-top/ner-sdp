@@ -48,6 +48,7 @@ class TransformersCRF(nn.Module):
 
     def __init__(self, config):
         super(TransformersCRF, self).__init__()
+        self.device = config.device
         # Embeddings
         self.embedder = TransformersEmbedder(transformer_model_name=config.embedder_type,
                                              parallel_embedder=config.parallel_embedder)
@@ -93,6 +94,7 @@ class TransformersCRF(nn.Module):
                     word_seq_lens: torch.Tensor,
                     orig_to_tok_index: torch.Tensor,
                     input_mask: torch.Tensor,
+                    synhead_ids: torch.Tensor, synlabel_ids: torch.Tensor,
                     labels: torch.Tensor) -> torch.Tensor:
         """
         Calculate the negative loglikelihood.
@@ -105,12 +107,11 @@ class TransformersCRF(nn.Module):
         :return: the total negative log-likelihood loss
         """
         word_rep = self.embedder(words, orig_to_tok_index, input_mask)
-        # 2022-01-06
         # lstm_scores = self.encoder(word_rep, word_seq_lens)
         lstm_feature, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
         self.lstm_enc_hidden = lstm_feature
         lstm_scores = self.linencoder(word_rep, word_seq_lens, lstm_feature, recover_idx)
-        # sdp-2022-01-04
+        # sdp-forward
         if self.training:
             lstm_outputs = drop_sequence_sharedmask(lstm_feature, self.dropout_mlp)#6*73*800
         x_all_dep = self.mlp_arc_dep(lstm_outputs)
@@ -136,8 +137,12 @@ class TransformersCRF(nn.Module):
         # cache
         self.arc_logits = arc_logit
         self.rel_logits = rel_logit
+        # sdp loss
+        lengths = max(word_seq_lens).item()
+        lengths = word_seq_lens.tolist()
+        true_arcs, true_rels = self.compute_true_arc_rel(synhead_ids, synlabel_ids, word_seq_lens)
+        # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
 
-        self.compute_sdp_loss()
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
         dev_num = word_rep.get_device()
@@ -165,43 +170,48 @@ class TransformersCRF(nn.Module):
 
     def compute_sdp_loss(self, true_arcs, true_rels, lengths):
         b, l1, l2 = self.arc_logits.size()
-        index_true_arcs = _model_var(
-            self.model,
-            pad_sequence(true_arcs, length=l1, padding=0, dtype=np.int64))
-        true_arcs = _model_var(
-            self.model,
-            pad_sequence(true_arcs, length=l1, padding=-1, dtype=np.int64))
+        x = pad_sequence(true_arcs, length=l1, padding=0, dtype=np.int64)
+        index_true_arcs = torch.autograd.Variable(x)
+        x = pad_sequence(true_arcs, length=l1, padding=-1, dtype=np.int64)
+        x = x.to(self.device)
+        true_arcs = torch.autograd.Variable(x)
 
         masks = []
         for length in lengths:
             mask = torch.FloatTensor([0] * length + [-10000] * (l2 - length))
-            mask = _model_var(self.model, mask)
+            mask = torch.autograd.Variable(mask)
             mask = torch.unsqueeze(mask, dim=1).expand(-1, l1)
             masks.append(mask.transpose(0, 1))
         length_mask = torch.stack(masks, 0)
-        arc_logits = self.arc_logits + length_mask
+        arc_logits = self.arc_logits + length_mask.to(self.device)
 
         arc_loss = F.cross_entropy(
             arc_logits.view(b * l1, l2), true_arcs.view(b * l1),
             ignore_index=-1)
 
-        size = self.rel_logits.size()
-        output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
-
-        for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
-            rel_probs = []
-            for i in range(l1):
-                rel_probs.append(logits[i][int(arcs[i])])
-            rel_probs = torch.stack(rel_probs, dim=0)
-            output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
-
-        b, l1, d = output_logits.size()
-        true_rels = _model_var(self.model, pad_sequence(true_rels, padding=-1, dtype=np.int64))
-
-        rel_loss = F.cross_entropy(
-            output_logits.view(b * l1, d), true_rels.view(b * l1), ignore_index=-1)
-
-        loss = arc_loss + rel_loss
+        # size = self.rel_logits.size()
+        # # output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
+        # x = torch.zeros(size[0], size[1], size[3])
+        # x = x.to(self.device)
+        # output_logits = torch.autograd.Variable(x)
+        #
+        # for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
+        #     rel_probs = []
+        #     for i in range(l1):
+        #         rel_probs.append(logits[i][int(arcs[i])])
+        #     rel_probs = torch.stack(rel_probs, dim=0)
+        #     output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
+        #
+        # b, l1, d = output_logits.size()
+        # # true_rels = _model_var(self.model, pad_sequence(true_rels, padding=-1, dtype=np.int64))
+        # x = pad_sequence(true_rels, padding=-1, dtype=np.int64)
+        # x = x.to(self.device)
+        # true_rels = torch.autograd.Variable(x)
+        #
+        # rel_loss = F.cross_entropy(
+        #     output_logits.view(b * l1, d), true_rels.view(b * l1), ignore_index=-1)
+        loss = arc_loss
+        # loss = arc_loss + rel_loss
 
         return loss
 
@@ -230,3 +240,19 @@ class TransformersCRF(nn.Module):
         total_arcs = b * l1 - np.sum(true_arcs.cpu().numpy() == -1)
 
         return arc_correct, label_correct, total_arcs
+
+    def compute_true_arc_rel(self, tensor_arcs, tensor_rels, word_seq_len):
+        true_arcs = []
+        true_rels = []
+
+        num_rows, num_cols = tensor_arcs.shape[0], tensor_arcs.shape[1]
+        for i in range(num_rows):
+            a = tensor_arcs[i, :]
+            true_arcs.append(a[0:word_seq_len[i].item()].numpy())
+
+        num_rows, num_cols = tensor_rels.shape[0], tensor_rels.shape[1]
+        for i in range(num_rows):
+            a = tensor_rels[i, :]
+            true_rels.append(a[0:word_seq_len[i].item()].numpy())
+
+        return true_arcs, true_rels
