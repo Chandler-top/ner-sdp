@@ -138,19 +138,22 @@ class TransformersCRF(nn.Module):
         self.arc_logits = arc_logit
         self.rel_logits = rel_logit
         # sdp loss
-        lengths = max(word_seq_lens).item()
+        # lengths = max(word_seq_lens).item()
         lengths = word_seq_lens.tolist()
-        true_arcs, true_rels = self.compute_true_arc_rel(synhead_ids, synlabel_ids, word_seq_lens)
-        # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
-
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
+        true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
+                                                word_seq_lens, batch_size)
+        sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
+        # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
+
         dev_num = word_rep.get_device()
         curr_dev = torch.device(f"cuda:{dev_num}") if dev_num >= 0 else torch.device("cpu")
         maskTemp = torch.arange(1, sent_len + 1, dtype=torch.long, device=curr_dev).view(1, sent_len).expand(batch_size, sent_len)
         mask = torch.le(maskTemp, word_seq_lens.view(batch_size, 1).expand(batch_size, sent_len))
         unlabed_score, labeled_score =  self.inferencer(lstm_scores, word_seq_lens, labels, mask)
-        return unlabed_score - labeled_score
+        ner_loss = unlabed_score - labeled_score
+        return ner_loss
 
     def decode(self, words: torch.Tensor,
                     word_seq_lens: torch.Tensor,
@@ -189,30 +192,28 @@ class TransformersCRF(nn.Module):
             arc_logits.view(b * l1, l2), true_arcs.view(b * l1),
             ignore_index=-1)
 
-        # size = self.rel_logits.size()
-        # # output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
-        # x = torch.zeros(size[0], size[1], size[3])
-        # x = x.to(self.device)
-        # output_logits = torch.autograd.Variable(x)
-        #
-        # for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
-        #     rel_probs = []
-        #     for i in range(l1):
-        #         rel_probs.append(logits[i][int(arcs[i])])
-        #     rel_probs = torch.stack(rel_probs, dim=0)
-        #     output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
-        #
-        # b, l1, d = output_logits.size()
-        # # true_rels = _model_var(self.model, pad_sequence(true_rels, padding=-1, dtype=np.int64))
-        # x = pad_sequence(true_rels, padding=-1, dtype=np.int64)
-        # x = x.to(self.device)
-        # true_rels = torch.autograd.Variable(x)
-        #
-        # rel_loss = F.cross_entropy(
-        #     output_logits.view(b * l1, d), true_rels.view(b * l1), ignore_index=-1)
-        loss = arc_loss
-        # loss = arc_loss + rel_loss
+        size = self.rel_logits.size()
+        # output_logits = _model_var(self.model, torch.zeros(size[0], size[1], size[3]))
+        x = torch.zeros(size[0], size[1], size[3])
+        x = x.to(self.device)
+        output_logits = torch.autograd.Variable(x)
 
+        for batch_index, (logits, arcs) in enumerate(zip(self.rel_logits, index_true_arcs)):
+            rel_probs = []
+            for i in range(l1):
+                rel_probs.append(logits[i][int(arcs[i])])
+            rel_probs = torch.stack(rel_probs, dim=0)
+            output_logits[batch_index] = torch.squeeze(rel_probs, dim=1)
+
+        b, l1, d = output_logits.size()
+        # true_rels = _model_var(self.model, pad_sequence(true_rels, padding=-1, dtype=np.int64))
+        x = pad_sequence(true_rels, padding=-1, dtype=np.int64)
+        x = x.to(self.device)
+        true_rels = torch.autograd.Variable(x)
+
+        rel_loss = F.cross_entropy(
+            output_logits.view(b * l1, d), true_rels.view(b * l1), ignore_index=-1)
+        loss = arc_loss + rel_loss
         return loss
 
     def compute_sdp_accuracy(self, true_arcs, true_rels):
@@ -241,18 +242,57 @@ class TransformersCRF(nn.Module):
 
         return arc_correct, label_correct, total_arcs
 
-    def compute_true_arc_rel(self, tensor_arcs, tensor_rels, word_seq_len):
+    def compute_true_arc_rel(self, tensor_arcs, tensor_rels, word_seq_len, batch_size):
         true_arcs = []
         true_rels = []
+        max_seq_len = max(word_seq_len).item()
+        # true_arcs = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
+        # true_rels = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
+
+        non_pad_mask = torch.zeros((batch_size, max_seq_len))
+        non_pad_mask = non_pad_mask.byte()
 
         num_rows, num_cols = tensor_arcs.shape[0], tensor_arcs.shape[1]
         for i in range(num_rows):
             a = tensor_arcs[i, :]
             true_arcs.append(a[0:word_seq_len[i].item()].numpy())
+            non_pad_mask[i, :word_seq_len[i].item()].fill_(1)
 
         num_rows, num_cols = tensor_rels.shape[0], tensor_rels.shape[1]
         for i in range(num_rows):
             a = tensor_rels[i, :]
             true_rels.append(a[0:word_seq_len[i].item()].numpy())
 
-        return true_arcs, true_rels
+        return true_arcs, true_rels, non_pad_mask
+
+    def cal_sdp_loss(self, pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask):
+        '''
+        :param pred_arcs: (bz, seq_len, seq_len) 预测已经带了padding
+        :param pred_rels:  (bz, seq_len, seq_len, rel_size)
+        :param true_arcs: (bz, seq_len)  包含padding -1 已经在transformers_dataset.py 的collate_fn中完成
+        :param true_rels: (bz, seq_len) 同上
+        :param non_pad_mask: (bz, seq_len) 有效部分mask
+        :return:
+        '''
+        pad_mask = (non_pad_mask == 0)
+
+        bz, seq_len, _ = pred_arcs.size()
+        masked_true_heads = true_arcs.masked_fill(pad_mask, -1)
+        arc_loss = F.cross_entropy(pred_arcs.reshape(bz*seq_len, -1),
+                                   masked_true_heads.reshape(-1),
+                                   ignore_index=-1)
+        print ("arc_loss:", arc_loss)
+        bz, seq_len, seq_len, rel_size = pred_rels.size()
+
+        out_rels = pred_rels[torch.arange(bz, device=pred_arcs.device, dtype=torch.long).unsqueeze(1),
+                             torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
+                             true_arcs].contiguous()
+
+        masked_true_rels = true_rels.masked_fill(pad_mask, -1)
+        # (bz*seq_len, rel_size)  (bz*seq_len, )
+        rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
+                                   masked_true_rels.reshape(-1),
+                                   ignore_index=-1)
+        print("rel_loss:", rel_loss)
+        return arc_loss + rel_loss
+        
