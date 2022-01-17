@@ -47,7 +47,7 @@ class Config:
         self.arc_hidden_dim = args.mlp_arc_size
         self.rel_hidden_dim = args.mlp_lab_size
         self.dropout_mlp_hidden = args.dropout_mlp_hidden
-        self.rel_size = len(['<pad>', 'root'])
+        # self.rel_size = len(['<pad>', 'root'])
 
         self.embedder_type = args.embedder_type if "embedder_type" in args.__dict__ else None
         self.parallel_embedder = args.parallel_embedder if "parallel_embedder" in args.__dict__ else None

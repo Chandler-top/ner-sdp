@@ -1,7 +1,7 @@
 #
 # @author: Allan
 #
-
+import torch
 from tqdm import tqdm
 from typing import List, Dict
 from torch.utils.data import Dataset
@@ -207,6 +207,8 @@ class TransformersNERDataset(Dataset):
         word_seq_len = [len(feature.orig_to_tok_index) for feature in batch]
         max_seq_len = max(word_seq_len)
         max_wordpiece_length = max([len(feature.input_ids) for feature in batch])
+        head_idx = torch.zeros(max_seq_len, dtype=torch.long)
+        rel_idx = torch.zeros(max_seq_len, dtype=torch.long)
         for i, feature in enumerate(batch):
             padding_length = max_wordpiece_length - len(feature.input_ids)
             input_ids = feature.input_ids + [self.tokenizer.pad_token_id] * padding_length
@@ -215,15 +217,17 @@ class TransformersNERDataset(Dataset):
             padding_word_len = max_seq_len - len(feature.orig_to_tok_index)
             orig_to_tok_index = feature.orig_to_tok_index + [0] * padding_word_len
             synhead_ids = feature.synhead_ids + [-1] * padding_word_len
+            head_idx = torch.tensor([id for id in synhead_ids])
             synlabel_ids = feature.synlabel_ids + [-1] * padding_word_len
+            rel_idx = torch.tensor([id for id in synlabel_ids])
             label_ids = feature.label_ids + [0] * padding_word_len
 
             batch[i] = Feature(input_ids=np.asarray(input_ids),
                                attention_mask=np.asarray(mask), token_type_ids=np.asarray(type_ids),
                                orig_to_tok_index=np.asarray(orig_to_tok_index),
                                word_seq_len =feature.word_seq_len,
-                               synhead_ids=np.asarray(synhead_ids),
-                               synlabel_ids=np.asarray(synlabel_ids),
+                               synhead_ids=head_idx,
+                               synlabel_ids=rel_idx,
                                label_ids=np.asarray(label_ids))
         results = Feature(*(default_collate(samples) for samples in zip(*batch)))
         return results
@@ -233,11 +237,16 @@ class TransformersNERDataset(Dataset):
 if __name__ == '__main__':
     from transformers import RobertaTokenizerFast
     tokenizer = RobertaTokenizerFast.from_pretrained('roberta-base', add_prefix_space=True)
-    dataset = TransformersNERDataset(file= "data/conll2003_sample/train.txt",tokenizer=tokenizer, is_train=True)
+    dataset = TransformersNERDataset(file= "data/ontonotes/train.txt",tokenizer=tokenizer, is_train=True)
     from torch.utils.data import DataLoader
-    train_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2, collate_fn=dataset.collate_fn)
+    # train_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2, collate_fn=dataset.collate_fn)
+    train_dataloader = DataLoader(dataset, batch_size=10, shuffle=False, num_workers=0, collate_fn=dataset.collate_fn)
     print(len(train_dataloader))
-    for batch in train_dataloader:
+    for idx, batch in enumerate(train_dataloader, 1) :
+        if idx  == 59:
+            print (batch.synhead_ids)
+        # a = batch.synhead_ids.type(torch.LongTensor)
+        # batch.synhead_ids  = a
+            print (batch.synlabel_ids)
         # print(batch.input_ids.size())
-        print(batch.input_ids)
         pass
