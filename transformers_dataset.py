@@ -216,9 +216,9 @@ class TransformersNERDataset(Dataset):
             type_ids = feature.token_type_ids + [self.tokenizer.pad_token_type_id] * padding_length
             padding_word_len = max_seq_len - len(feature.orig_to_tok_index)
             orig_to_tok_index = feature.orig_to_tok_index + [0] * padding_word_len
-            synhead_ids = feature.synhead_ids + [-1] * padding_word_len
+            synhead_ids = feature.synhead_ids + [-100] * padding_word_len
             head_idx = torch.tensor([id for id in synhead_ids])
-            synlabel_ids = feature.synlabel_ids + [-1] * padding_word_len
+            synlabel_ids = feature.synlabel_ids + [-100] * padding_word_len
             rel_idx = torch.tensor([id for id in synlabel_ids])
             label_ids = feature.label_ids + [0] * padding_word_len
 
