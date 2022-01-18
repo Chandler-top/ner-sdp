@@ -325,14 +325,16 @@ class TransformersCRF(nn.Module):
         pad_mask = (non_pad_mask == 0)
 
         bz, seq_len, _ = pred_arcs.size()
+        print("pred_arcs_size:", bz, seq_len, _)
+        print("true_arcs_size:",true_arcs.size())
         masked_true_heads = true_arcs.masked_fill(pad_mask, -1).to(self.device)
         arc_loss = F.cross_entropy(pred_arcs.reshape(bz*seq_len, -1),
                                    masked_true_heads.reshape(-1),
                                    ignore_index=-1)
         # return arc_loss
         bz, seq_len, seq_len, rel_size = pred_rels.size()
-        print (bz,seq_len, rel_size)
-
+        print ("pred_rels_size:",pred_rels.size())
+        print("true_rels_size:", true_rels.size())
         out_rels = pred_rels[torch.arange(bz, device=pred_arcs.device, dtype=torch.long).unsqueeze(1),
                              torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
                              true_arcs].contiguous()
