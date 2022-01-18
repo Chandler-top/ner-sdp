@@ -325,7 +325,7 @@ class TransformersCRF(nn.Module):
         pad_mask = (non_pad_mask == 0)
 
         bz, seq_len, _ = pred_arcs.size()
-        masked_true_heads = true_arcs.masked_fill(pad_mask, -100).to(self.device)
+        masked_true_heads = true_arcs.masked_fill(pad_mask, -1).to(self.device)
         arc_loss = F.cross_entropy(pred_arcs.reshape(bz*seq_len, -1),
                                    masked_true_heads.reshape(-1),
                                    ignore_index=-1)
@@ -337,7 +337,7 @@ class TransformersCRF(nn.Module):
                              torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
                              true_arcs].contiguous()
 
-        masked_true_rels = true_rels.masked_fill(pad_mask, -100).to(self.device)
+        masked_true_rels = true_rels.masked_fill(pad_mask, -1).to(self.device)
         # (bz*seq_len, rel_size)  (bz*seq_len, )
         rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
                                    masked_true_rels.reshape(-1),

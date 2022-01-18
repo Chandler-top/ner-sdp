@@ -172,6 +172,9 @@ class TransformersNERDataset(Dataset):
                     labels = convert_iobes(labels)
                     insts.append(Instance(words=words, ori_words=ori_words, pos_tags=tags,
                                           synheads=synheads, syndep_labels=syndeps, labels=labels))
+                    # for id in synheads:
+                    #     if id >= len(words):
+                    #         print ("error!")
                     words = []
                     ori_words = []
                     tags = []
@@ -190,7 +193,7 @@ class TransformersNERDataset(Dataset):
                 tags.append(pos)
                 if synhead == 0 and find_root:
                     raise err("already have a root")
-                synheads.append(synhead) ## because of 0-indexed. 现在直接读词的序号，不减1
+                synheads.append(int(synhead)-1) ## because of 0-indexed.
                 syndeps.append(syndep)
                 labels.append(label)
         print("number of sentences: {}".format(len(insts)))
