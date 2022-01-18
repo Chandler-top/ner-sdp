@@ -210,8 +210,6 @@ class TransformersNERDataset(Dataset):
         word_seq_len = [len(feature.orig_to_tok_index) for feature in batch]
         max_seq_len = max(word_seq_len)
         max_wordpiece_length = max([len(feature.input_ids) for feature in batch])
-        head_idx = torch.zeros(max_seq_len, dtype=torch.long)
-        rel_idx = torch.zeros(max_seq_len, dtype=torch.long)
         for i, feature in enumerate(batch):
             padding_length = max_wordpiece_length - len(feature.input_ids)
             input_ids = feature.input_ids + [self.tokenizer.pad_token_id] * padding_length
