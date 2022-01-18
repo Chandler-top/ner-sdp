@@ -329,7 +329,7 @@ class TransformersCRF(nn.Module):
         arc_loss = F.cross_entropy(pred_arcs.reshape(bz*seq_len, -1),
                                    masked_true_heads.reshape(-1),
                                    ignore_index=-1)
-        return arc_loss
+        # return arc_loss
         bz, seq_len, seq_len, rel_size = pred_rels.size()
         print (bz,seq_len, rel_size)
 
