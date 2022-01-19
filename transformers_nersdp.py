@@ -190,9 +190,8 @@ class TransformersCRF(nn.Module):
         sent_len = word_rep.size(1)
         true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
                                                 word_seq_lens, batch_size)
-        # if iter == 59:
-        #     print (arc_logit, rel_logit, synhead_ids, synhead_ids)
-        # sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
+
+        sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
         # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
 
         dev_num = word_rep.get_device()
