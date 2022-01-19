@@ -190,7 +190,7 @@ class TransformersCRF(nn.Module):
         sent_len = word_rep.size(1)
         true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
                                                 word_seq_lens, batch_size)
-        print (synlabel_ids)
+
         sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask.to(self.device))
         print ("sdp_loss:", sdp_loss)
         # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
@@ -344,6 +344,6 @@ class TransformersCRF(nn.Module):
         rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
                                    masked_true_rels.reshape(-1),
                                    ignore_index=-1)
-        print("rel_loss:", rel_loss)
+        print (rel_loss)
         return arc_loss + rel_loss
         
