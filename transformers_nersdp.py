@@ -188,10 +188,9 @@ class TransformersCRF(nn.Module):
         # lengths = word_seq_lens.tolist()
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
-        true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
-                                                word_seq_lens, batch_size)
+        no_pad_mask = self.compute_true_arc_rel(synhead_ids, word_seq_lens, batch_size)
 
-        sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask.to(self.device))
+        sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit.to(self.device),synhead_ids,synlabel_ids,no_pad_mask.to(self.device))
         print ("sdp_loss:", sdp_loss)
         # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
 
@@ -291,9 +290,7 @@ class TransformersCRF(nn.Module):
 
         return arc_correct, label_correct, total_arcs
 
-    def compute_true_arc_rel(self, tensor_arcs, tensor_rels, word_seq_len, batch_size):
-        true_arcs = []
-        true_rels = []
+    def compute_true_arc_rel(self, tensor_arcs, word_seq_len, batch_size):
         max_seq_len = max(word_seq_len).item()
         # true_arcs = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
         # true_rels = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
@@ -312,7 +309,7 @@ class TransformersCRF(nn.Module):
         #     a = tensor_rels[i, :]
         #     true_rels.append(a[0:word_seq_len[i].item()].numpy())
 
-        return true_arcs, true_rels, non_pad_mask
+        return non_pad_mask
 
     def cal_sdp_loss(self, pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask):
         '''
