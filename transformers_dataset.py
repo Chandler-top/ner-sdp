@@ -157,11 +157,17 @@ class TransformersNERDataset(Dataset):
         insts = []
         with open(file, 'r', encoding='utf-8') as f:
             words = []
+            words.append('<root>')
             ori_words = []
+            ori_words.append('<root>')
             tags = []
+            tags.append('root')
             synheads = []
+            synheads.append(0)
             syndeps = []
+            syndeps.append('root')
             labels = []
+            labels.append('O')
             find_root = False
 
             for line in tqdm(f.readlines()):
@@ -176,11 +182,17 @@ class TransformersNERDataset(Dataset):
                     #     if id >= len(words):
                     #         print ("error!")
                     words = []
+                    words.append('<root>')
                     ori_words = []
+                    ori_words.append('<root>')
                     tags = []
+                    tags.append('root')
                     synheads = []
+                    synheads.append(0)
                     syndeps = []
+                    syndeps.append('root')
                     labels = []
+                    labels.append('O')
                     find_root = False
 
                     if len(insts) == number:
@@ -193,7 +205,7 @@ class TransformersNERDataset(Dataset):
                 tags.append(pos)
                 if synhead == 0 and find_root:
                     raise err("already have a root")
-                synheads.append(int(synhead)-1) ## because of 0-indexed.
+                synheads.append(int(synhead)) ## because of 0-indexed.
                 syndeps.append(syndep)
                 labels.append(label)
         print("number of sentences: {}".format(len(insts)))
