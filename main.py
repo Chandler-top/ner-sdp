@@ -139,7 +139,7 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             #     print (batch.synhead_ids)
             loss = model(iter = iter, words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device), input_mask = batch.attention_mask.to(config.device),
-                    synhead_ids = batch.synhead_ids, synlabel_ids = batch.synlabel_ids,
+                    synhead_ids = batch.synhead_ids.to(config.device), synlabel_ids = batch.synlabel_ids.to(config.device),
                     labels = batch.label_ids.to(config.device))
             # if iter == 59:
             #     print ("iter:{} loss error out", iter)

@@ -256,10 +256,9 @@ if __name__ == '__main__':
     train_dataloader = DataLoader(dataset, batch_size=10, shuffle=False, num_workers=0, collate_fn=dataset.collate_fn)
     print(len(train_dataloader))
     for idx, batch in enumerate(train_dataloader, 1) :
-        if idx  == 59:
-            print (batch.synhead_ids)
+        print (batch.synhead_ids)
         # a = batch.synhead_ids.type(torch.LongTensor)
         # batch.synhead_ids  = a
-            print (batch.synlabel_ids)
+        print (batch.synlabel_ids)
         # print(batch.input_ids.size())
         pass

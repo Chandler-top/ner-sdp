@@ -190,13 +190,15 @@ class TransformersCRF(nn.Module):
         sent_len = word_rep.size(1)
         true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
                                                 word_seq_lens, batch_size)
-
+        print (synlabel_ids)
         sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
+        print ("sdp_loss:", sdp_loss)
         # sdp_loss = self.compute_sdp_loss(true_arcs,true_rels,lengths)
 
         dev_num = word_rep.get_device()
         curr_dev = torch.device(f"cuda:{dev_num}") if dev_num >= 0 else torch.device("cpu")
         maskTemp = torch.arange(1, sent_len + 1, dtype=torch.long, device=curr_dev).view(1, sent_len).expand(batch_size, sent_len)
+
         mask = torch.le(maskTemp, word_seq_lens.view(batch_size, 1).expand(batch_size, sent_len))
         unlabed_score, labeled_score =  self.inferencer(lstm_scores, word_seq_lens, labels, mask)
         ner_loss = unlabed_score - labeled_score
@@ -326,24 +328,22 @@ class TransformersCRF(nn.Module):
         bz, seq_len, _ = pred_arcs.size()
         # print("pred_arcs_size:", bz, seq_len, _)
         # print("true_arcs_size:",true_arcs.size())
-        masked_true_heads = true_arcs.masked_fill(pad_mask, -1).to(self.device)
+        masked_true_heads = true_arcs.masked_fill(pad_mask, -1)
         arc_loss = F.cross_entropy(pred_arcs.reshape(bz*seq_len, -1),
                                    masked_true_heads.reshape(-1),
                                    ignore_index=-1)
 
         bz, seq_len, seq_len, rel_size = pred_rels.size()
-        # print ("pred_rels_size:",pred_rels.size())
-        # print("true_rels_size:", true_rels.size())
-
         out_rels = pred_rels[torch.arange(bz, device=pred_arcs.device, dtype=torch.long).unsqueeze(1),
                              torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
                              true_arcs].contiguous()
-        return arc_loss
-        masked_true_rels = true_rels.masked_fill(pad_mask, -1).to(self.device)
+        # return arc_loss
+        masked_true_rels = true_rels.masked_fill(pad_mask, -1)
         # (bz*seq_len, rel_size)  (bz*seq_len, )
+        print ("masked_true_rels size:", masked_true_rels.size())
         rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
                                    masked_true_rels.reshape(-1),
                                    ignore_index=-1)
-        # print("rel_loss:", rel_loss)
+        print("rel_loss:", rel_loss)
         return arc_loss + rel_loss
         

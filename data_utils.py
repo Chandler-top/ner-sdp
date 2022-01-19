@@ -124,8 +124,8 @@ def build_deplabel_idx(insts: List[Instance]) -> Tuple[Dict[str, int], int]:
 	deplabel2idx = {}
 	deplabels = []
 	root = ''
-	deplabel2idx[PAD] = len(deplabel2idx)
-	deplabels.append(PAD)
+	# deplabel2idx[PAD] = len(deplabel2idx)
+	# deplabels.append(PAD)
 
 	# if self_label not in deplabel2idx:
 	# 	deplabels.append(self_label)
