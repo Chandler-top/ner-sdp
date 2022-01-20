@@ -251,10 +251,8 @@ class TransformersCRF(nn.Module):
 
         # (bz, seq_len)
         pred_heads = pred_arcs.data.argmax(dim=2)
-        masked_pred_heads = pred_heads[_mask]
-        masked_pred_heads = masked_pred_heads.bool()
-        masked_true_heads = true_heads[_mask]
-        masked_true_heads = masked_true_heads.bool()
+        masked_pred_heads = pred_heads[_mask].bool()
+        masked_true_heads = true_heads[_mask].bool()
         arc_acc = masked_true_heads.eq(masked_pred_heads).sum().item()
 
         total_arcs = non_pad_mask.sum().item()
@@ -263,8 +261,8 @@ class TransformersCRF(nn.Module):
                              torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
                              true_heads].contiguous()
         pred_rels = out_rels.argmax(dim=2)
-        masked_pred_rels = pred_rels[_mask]
-        masked_true_rels = true_rels[_mask]
+        masked_pred_rels = pred_rels[_mask].bool()
+        masked_true_rels = true_rels[_mask].bool()
         rel_acc = masked_true_rels.eq(masked_pred_rels).sum().item()
 
         return arc_acc, rel_acc, total_arcs
