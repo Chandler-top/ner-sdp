@@ -8,7 +8,7 @@ class Instance:
 	pos_tags: List[str] = None
 	synheads: List[int] = None
 	syndep_labels: List[str] = None
-	# semheads: List[int] =None
-	# semdep_labels: List[str] = None
+	semheads: List[int] =None
+	semdep_labels: List[str] = None
 	labels: List[str] = None
 	prediction: List[str]  = None

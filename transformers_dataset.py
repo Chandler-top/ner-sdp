@@ -1,8 +1,9 @@
 #
 # @author: Allan
 #
-import torch
+
 from tqdm import tqdm
+import torch
 from typing import List, Dict
 from torch.utils.data import Dataset
 from torch.utils.data._utils.collate import default_collate
@@ -16,7 +17,7 @@ from instance import Instance
 # Feature = collections.namedtuple('Feature', 'input_ids attention_mask token_type_ids orig_to_tok_index word_seq_len label_ids')
 Feature = namedtuple('Feature', 'input_ids attention_mask token_type_ids orig_to_tok_index word_seq_len synhead_ids synlabel_ids label_ids')
 # Feature.__new__.__defaults__ = (None,) * 6
-Feature.__new__.__defaults__ = (None,) * 8
+Feature.__new__.__defaults__ = (None,) * len(Feature._fields)
 
 def convert_instances_to_feature_tensors(instances: List[Instance],
                                          tokenizer: PreTrainedTokenizerFast,
@@ -53,7 +54,7 @@ def convert_instances_to_feature_tensors(instances: List[Instance],
         label_ids = [label2idx[label] for label in labels] if labels else [-100] * len(words)
         # 2022-01-09-syn-dep
         syndep_labels = inst.syndep_labels
-        syndep_label_ids = [syndep_label2idx[syndep_label] for syndep_label in syndep_labels] if syndep_labels else[-100] * len(words)
+        syndep_label_ids = [syndep_label2idx[syndep_label] for syndep_label in  syndep_labels] if syndep_labels else[-100] * len(words)
         synhead_ids = inst.synheads
         segment_ids = [0] * len(res["input_ids"])
 
@@ -155,19 +156,14 @@ class TransformersNERDataset(Dataset):
         print(f"[Data Info] Reading file: {file}, labels will be converted to IOBES encoding")
         print(f"[Data Info] Modify src/data/transformers_dataset.read_txt function if you have other requirements")
         insts = []
+
         with open(file, 'r', encoding='utf-8') as f:
             words = []
-            words.append('<root>')
             ori_words = []
-            ori_words.append('<root>')
             tags = []
-            tags.append('root')
             synheads = []
-            synheads.append(0)
             syndeps = []
-            syndeps.append('root')
             labels = []
-            labels.append('O')
             find_root = False
 
             for line in tqdm(f.readlines()):
@@ -178,9 +174,6 @@ class TransformersNERDataset(Dataset):
                     labels = convert_iobes(labels)
                     insts.append(Instance(words=words, ori_words=ori_words, pos_tags=tags,
                                           synheads=synheads, syndep_labels=syndeps, labels=labels))
-                    # for id in synheads:
-                    #     if id >= len(words):
-                    #         print ("error!")
                     words = []
                     words.append('<root>')
                     ori_words = []
@@ -205,7 +198,7 @@ class TransformersNERDataset(Dataset):
                 tags.append(pos)
                 if synhead == 0 and find_root:
                     raise err("already have a root")
-                synheads.append(int(synhead)) ## because of 0-indexed.
+                synheads.append(int(synhead)) ## because of 0-indexed. 现在直接读词的序号，不减1
                 syndeps.append(syndep)
                 labels.append(label)
         print("number of sentences: {}".format(len(insts)))
@@ -221,6 +214,7 @@ class TransformersNERDataset(Dataset):
     def collate_fn(self, batch:List[Feature]):
         word_seq_len = [len(feature.orig_to_tok_index) for feature in batch]
         max_seq_len = max(word_seq_len)
+
         max_wordpiece_length = max([len(feature.input_ids) for feature in batch])
         for i, feature in enumerate(batch):
             padding_length = max_wordpiece_length - len(feature.input_ids)
@@ -229,9 +223,9 @@ class TransformersNERDataset(Dataset):
             type_ids = feature.token_type_ids + [self.tokenizer.pad_token_type_id] * padding_length
             padding_word_len = max_seq_len - len(feature.orig_to_tok_index)
             orig_to_tok_index = feature.orig_to_tok_index + [0] * padding_word_len
-            synhead_ids = feature.synhead_ids + [-100] * padding_word_len
+            synhead_ids = feature.synhead_ids + [0] * padding_word_len
             head_idx = torch.tensor([id for id in synhead_ids])
-            synlabel_ids = feature.synlabel_ids + [-100] * padding_word_len
+            synlabel_ids = feature.synlabel_ids + [0] * padding_word_len
             rel_idx = torch.tensor([id for id in synlabel_ids])
             label_ids = feature.label_ids + [0] * padding_word_len
 
@@ -242,7 +236,15 @@ class TransformersNERDataset(Dataset):
                                synhead_ids=head_idx,
                                synlabel_ids=rel_idx,
                                label_ids=np.asarray(label_ids))
+
         results = Feature(*(default_collate(samples) for samples in zip(*batch)))
+        # if max(results.word_seq_len) == 35:
+        #     idx = 1
+        #     for h, r,b in zip(results.synhead_ids, results.synlabel_ids, results.label_ids):
+        #         f32.write("{}\t{}\t{}\t{}\n".format(idx, h, r, b))
+        #         idx += 1
+        #     f32.write('\n')
+        # f32.close()
         return results
 
 
@@ -252,13 +254,9 @@ if __name__ == '__main__':
     tokenizer = RobertaTokenizerFast.from_pretrained('roberta-base', add_prefix_space=True)
     dataset = TransformersNERDataset(file= "data/ontonotes/train.txt",tokenizer=tokenizer, is_train=True)
     from torch.utils.data import DataLoader
-    # train_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=2, collate_fn=dataset.collate_fn)
-    train_dataloader = DataLoader(dataset, batch_size=10, shuffle=False, num_workers=0, collate_fn=dataset.collate_fn)
-    print(len(train_dataloader))
-    for idx, batch in enumerate(train_dataloader, 1) :
-        print (batch.synhead_ids)
-        # a = batch.synhead_ids.type(torch.LongTensor)
-        # batch.synhead_ids  = a
-        print (batch.synlabel_ids)
-        # print(batch.input_ids.size())
+    train_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=0, collate_fn=dataset.collate_fn)
+    print (len(train_dataloader))
+    for iter, batch in enumerate(train_dataloader):
+        if iter == 227:
+            print(batch.input_ids.size())
         pass

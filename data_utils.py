@@ -124,8 +124,8 @@ def build_deplabel_idx(insts: List[Instance]) -> Tuple[Dict[str, int], int]:
 	deplabel2idx = {}
 	deplabels = []
 	root = ''
-	# deplabel2idx[PAD] = len(deplabel2idx)
-	# deplabels.append(PAD)
+	deplabel2idx[PAD] = len(deplabel2idx)
+	deplabels.append(PAD)
 
 	# if self_label not in deplabel2idx:
 	# 	deplabels.append(self_label)
@@ -133,7 +133,7 @@ def build_deplabel_idx(insts: List[Instance]) -> Tuple[Dict[str, int], int]:
 	for inst in insts:
 		idx = 0
 		for synhead, syndep_label in zip(inst.synheads,inst.syndep_labels):
-			if synhead != -1:
+			if synhead != 0:
 				if syndep_label not in deplabels:
 					deplabels.append(syndep_label)
 					deplabel2idx[syndep_label] = len(deplabel2idx)
