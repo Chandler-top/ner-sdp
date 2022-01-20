@@ -1,0 +1,36 @@
+1	What	_	WP	WP	_	2	det	_	_	O
+2	kind	_	NN	NN	_	0	root	_	_	O
+3	of	_	IN	IN	_	2	prep	_	_	O
+4	memory	_	NN	NN	_	3	pobj	_	_	O
+5	?	_	.	.	_	2	punct	_	_	O
+
+1	We	_	PRP	PRP	_	3	nsubj	_	_	O
+2	respectfully	_	RB	RB	_	3	advmod	_	_	O
+3	invite	_	VB	VB	_	0	root	_	_	O
+4	you	_	PRP	PRP	_	3	dobj	_	_	O
+5	to	_	TO	TO	_	6	aux	_	_	O
+6	watch	_	VB	VB	_	3	vmod	_	_	O
+7	a	_	DT	DT	_	9	det	_	_	O
+8	special	_	JJ	JJ	_	9	amod	_	_	O
+9	edition	_	NN	NN	_	6	dobj	_	_	O
+10	of	_	IN	IN	_	9	prep	_	_	O
+11	Across	_	NNP	NNP	_	12	nn	_	_	B-ORG
+12	China	_	NNP	NNP	_	10	pobj	_	_	I-ORG
+13	.	_	.	.	_	3	punct	_	_	O
+
+1	WW	_	NNP	NNP	_	3	nn	_	_	B-WORK_OF_ART
+2	II	_	NNP	NNP	_	3	nn	_	_	I-WORK_OF_ART
+3	Landmarks	_	NNPS	NNPS	_	0	root	_	_	I-WORK_OF_ART
+4	on	_	IN	IN	_	3	prep	_	_	I-WORK_OF_ART
+5	the	_	DT	DT	_	7	det	_	_	I-WORK_OF_ART
+6	Great	_	NNP	NNP	_	7	nn	_	_	I-WORK_OF_ART
+7	Earth	_	NNP	NNP	_	4	pobj	_	_	I-WORK_OF_ART
+8	of	_	IN	IN	_	7	prep	_	_	I-WORK_OF_ART
+9	China	_	NNP	NNP	_	8	pobj	_	_	I-WORK_OF_ART
+10	:	_	,	,	_	3	punct	_	_	I-WORK_OF_ART
+11	Eternal	_	JJ	JJ	_	12	amod	_	_	I-WORK_OF_ART
+12	Memories	_	NNPS	NNPS	_	3	appos	_	_	I-WORK_OF_ART
+13	of	_	IN	IN	_	12	prep	_	_	I-WORK_OF_ART
+14	Taihang	_	NNP	NNP	_	15	nn	_	_	I-WORK_OF_ART
+15	Mountain	_	NNP	NNP	_	13	pobj	_	_	I-WORK_OF_ART
+

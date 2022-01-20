@@ -141,7 +141,7 @@ class TransformersCRF(nn.Module):
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
 
-        true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
+        _, _, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
                                                 word_seq_lens, batch_size)
         sdp_loss, _, _ = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
 
@@ -183,13 +183,13 @@ class TransformersCRF(nn.Module):
         num_rows, num_cols = tensor_arcs.shape[0], tensor_arcs.shape[1]
         for i in range(num_rows):
             a = tensor_arcs[i, :]
-            true_arcs.append(a[0:word_seq_len[i].item()].numpy())
+            # true_arcs.append(a[0:word_seq_len[i].item()].cpu().numpy())
             non_pad_mask[i, :word_seq_len[i].item()].fill_(1)
 
-        num_rows, num_cols = tensor_rels.shape[0], tensor_rels.shape[1]
-        for i in range(num_rows):
-            a = tensor_rels[i, :]
-            true_rels.append(a[0:word_seq_len[i].item()].numpy())
+        # num_rows, num_cols = tensor_rels.shape[0], tensor_rels.shape[1]
+        # for i in range(num_rows):
+        #     a = tensor_rels[i, :]
+        #     true_rels.append(a[0:word_seq_len[i].item()].numpy())
 
         return true_arcs, true_rels, non_pad_mask
 
