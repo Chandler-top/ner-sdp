@@ -138,7 +138,7 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             # 统一的loss 输出，同时这个地方要把heads，rels传输去做预测和损失计算
             loss = model(words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device), input_mask = batch.attention_mask.to(config.device),
-                    synhead_ids = batch.synhead_ids, synlabel_ids = batch.synlabel_ids,
+                    synhead_ids = batch.synhead_ids.to(config.device), synlabel_ids = batch.synlabel_ids.to(config.device),
                     labels = batch.label_ids.to(config.device))
             epoch_loss += loss.item()
             loss.backward()
@@ -150,8 +150,8 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             model.zero_grad()
         end_time = time.time()
         print("Epoch %d: %.5f, Time is %.2fs" % (i, epoch_loss, end_time - start_time), flush=True)
-        # print ('sdp train loss: %.3f, ARC: %.3f%%, REL: %.3f%%' % (loss, model.arc, model.rel), flush=True)
         model.eval()
+        # 在 ner 的 evaluete中，加入 sdp 的 evaluate
         dev_metrics = evaluate_model(config, model, dev_loader, "dev", dev_loader.dataset.insts)
         test_metrics = evaluate_model(config, model, test_loader, "test", test_loader.dataset.insts)
         if dev_metrics[2] > best_dev[0]:
@@ -195,6 +195,7 @@ def evaluate_model(config: Config, model: TransformersCRF, data_loader: DataLoad
     with torch.no_grad():
         for batch_id, batch in tqdm(enumerate(data_loader, 0), desc="--evaluating batch", total=len(data_loader)):
             one_batch_insts = insts[batch_id * batch_size:(batch_id + 1) * batch_size]
+            # sdp 的 evaluate 需要加入到 model.decode中
             batch_max_scores, batch_max_ids = model.decode(words= batch.input_ids.to(config.device),
                     word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device),
@@ -250,7 +251,6 @@ def main():
                                               is_train=False)
         num_workers = 0
         conf.label_size = len(train_dataset.label2idx)
-
 
         train_dataloader = DataLoader(train_dataset, batch_size=conf.batch_size, shuffle=True, num_workers=num_workers,
                                       collate_fn=train_dataset.collate_fn)

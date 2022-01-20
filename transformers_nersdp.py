@@ -49,7 +49,6 @@ class TransformersCRF(nn.Module):
     def __init__(self, config):
         super(TransformersCRF, self).__init__()
         self.device = config.device
-        self.all_arc_acc, self.all_rel_acc, self.all_arcs = 0, 0, 0
         # Embeddings
         self.embedder = TransformersEmbedder(transformer_model_name=config.embedder_type,
                                              parallel_embedder=config.parallel_embedder)
@@ -144,7 +143,7 @@ class TransformersCRF(nn.Module):
 
         true_arcs, true_rels, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
                                                 word_seq_lens, batch_size)
-        sdp_loss = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
+        sdp_loss, _, _ = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
 
         dev_num = word_rep.get_device()
         curr_dev = torch.device(f"cuda:{dev_num}") if dev_num >= 0 else torch.device("cpu")
@@ -166,6 +165,7 @@ class TransformersCRF(nn.Module):
 
         word_rep = self.embedder(words, orig_to_tok_index, input_mask)
         lstm_features, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
+        # 这个地方加入 sdp 的 解析
         features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
         bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
         return bestScores, decodeIdx
@@ -222,8 +222,18 @@ class TransformersCRF(nn.Module):
         rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
                                    masked_true_rels.reshape(-1))
         # print("rel_loss:", rel_loss)
-        print ('batchsize sdp train loss: %.2f' % (arc_loss + rel_loss).data.item())
-        return arc_loss + rel_loss
+
+
+        all_arc_acc, all_rel_acc, all_arcs = 0, 0, 0
+        arc_acc, rel_acc, total_arcs = self.calc_sdp_acc(pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask)
+        all_arc_acc += arc_acc
+        all_rel_acc += rel_acc
+        all_arcs += total_arcs
+
+        ARC = all_arc_acc * 100. / all_arcs
+        REL = all_rel_acc * 100. / all_arcs
+        print('batchsize sdp train loss: %.2f, ARC: %.3f%%, REL: %.3f%% ' % ((arc_loss + rel_loss).data.item(), ARC, REL))
+        return arc_loss + rel_loss, ARC, REL
 
     def calc_sdp_acc(self, pred_arcs, pred_rels, true_heads, true_rels, non_pad_mask=None):
         '''a
@@ -242,7 +252,9 @@ class TransformersCRF(nn.Module):
         # (bz, seq_len)
         pred_heads = pred_arcs.data.argmax(dim=2)
         masked_pred_heads = pred_heads[_mask]
+        masked_pred_heads = masked_pred_heads.bool()
         masked_true_heads = true_heads[_mask]
+        masked_true_heads = masked_true_heads.bool()
         arc_acc = masked_true_heads.eq(masked_pred_heads).sum().item()
 
         total_arcs = non_pad_mask.sum().item()
@@ -255,12 +267,4 @@ class TransformersCRF(nn.Module):
         masked_true_rels = true_rels[_mask]
         rel_acc = masked_true_rels.eq(masked_pred_rels).sum().item()
 
-        self.all_arc_acc += arc_acc
-        self.all_rel_acc += rel_acc
-        self.all_arcs += total_arcs
-
-        ARC = self.all_arc_acc * 100. / self.all_arcs
-        REL = self.all_rel_acc * 100. / self.all_arcs
-        print ('ARC: %.3f%%, REL: %.3f%%' % (ARC, REL))
-        return ARC, REL
-        # return arc_acc, rel_acc, total_arcs
+        return arc_acc, rel_acc, total_arcs
