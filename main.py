@@ -150,7 +150,7 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             model.zero_grad()
         end_time = time.time()
         print("Epoch %d: %.5f, Time is %.2fs" % (i, epoch_loss, end_time - start_time), flush=True)
-
+        # print ('sdp train loss: %.3f, ARC: %.3f%%, REL: %.3f%%' % (loss, model.arc, model.rel), flush=True)
         model.eval()
         dev_metrics = evaluate_model(config, model, dev_loader, "dev", dev_loader.dataset.insts)
         test_metrics = evaluate_model(config, model, test_loader, "test", test_loader.dataset.insts)

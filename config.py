@@ -73,7 +73,11 @@ class Config:
         self.batch_size = args.batch_size
         self.clip = 5
         self.lr_decay = args.lr_decay
-        self.device = torch.device(args.device)
+        if torch.cuda.is_available():
+            self.device = torch.device(args.device)
+        else:
+            self.device = torch.device("cpu")
+        # self.device = torch.device(args.device)
         self.max_no_incre = args.max_no_incre
         self.max_grad_norm = args.max_grad_norm if "max_grad_norm" in args.__dict__ else None
 
