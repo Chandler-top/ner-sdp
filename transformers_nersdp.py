@@ -164,7 +164,7 @@ class TransformersCRF(nn.Module):
                     word_seq_lens: torch.Tensor,
                     orig_to_tok_index: torch.Tensor,
                     input_mask,
-                    synhead_ids: torch.Tensor=None, synlabel_ids: torch.Tenso=None,
+                    synhead_ids: torch.Tensor=None, synlabel_ids: torch.Tensor=None,
                     **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Decode the batch input
@@ -173,6 +173,7 @@ class TransformersCRF(nn.Module):
         """
         word_rep = self.embedder(words, orig_to_tok_index, input_mask)
         lstm_features, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
+        lstm_outputs = lstm_features
         if self.mtlevlmode == 0:
             features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
             bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
