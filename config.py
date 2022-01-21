@@ -84,6 +84,8 @@ class Config:
         self.print_detail_f1 = args.print_detail_f1
         self.earlystop_atr = args.earlystop_atr
 
+        self.mtlevlmode = args.mtlevlmode
+
     def read_pretrain_embedding(self) -> Tuple[Union[Dict[str, np.array], None], int]:
         """
         Read the pretrained word embeddings, return the complete embeddings and the embedding dimension

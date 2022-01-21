@@ -37,10 +37,9 @@ def parse_arguments(parser):
     parser.add_argument('--device', type=str, default="cpu", help="GPU/CPU devices")
     parser.add_argument('--seed', type=int, default=42, help="random seed")
     parser.add_argument('--dataset', type=str, default="ontonotes")
-    parser.add_argument('--mtl mode', type=int, default="0", choices=[0, 1, 2, 3, 4, 5],
-                        help="multitask mode, 0 means ner without dp. 1 means ner with syntactic dp. "
-                             "2 means ner with semantic dp. 3 means ner with syntactic and semantic dp."
-                             "4 means syntactic dp. 5 means semantic dp.")
+    parser.add_argument('--mtlevlmode', type=int, default="0", choices=[0, 1, 2, 3],
+                        help="multitask evaluate and test mode, 0 means ner without dp data. 1 means ner with syntactic dp data. "
+                             "2 means ner with semantic dp data. 3 means ner with syntactic and semantic dp data.")
     parser.add_argument('--optimizer', type=str, default="adamw",
                         help="This would be useless if you are working with transformers package")
     parser.add_argument('--learning_rate', type=float, default=2e-5,
@@ -126,6 +125,8 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
     os.makedirs(res_folder, exist_ok=True)
     no_incre_dev = 0
     print(colored(f"[Train Info] Start training, you have set to stop if performace not increase for {config.max_no_incre} epochs",'red'))
+    best_uas = 0
+    test_best_uas, test_best_las = 0, 0
     for i in tqdm(range(1, epoch + 1), desc="Epoch"):
         epoch_loss = 0
         start_time = time.time()
@@ -155,15 +156,25 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
 
             ARC = all_arc_acc * 100. / all_arcs
             REL = all_rel_acc * 100. / all_arcs
-            print('batchsize ner train loss: %.2f, sdp train loss: %.2f, ARC: %.3f%%, REL: %.3f%% ' % (
-            nerloss.data.item(), sdploss.data.item(), ARC, REL))
+            # print('batchsize ner train loss: %.2f, sdp train loss: %.2f, ARC: %.3f%%, REL: %.3f%% ' % (
+            # nerloss.data.item(), sdploss.data.item(), ARC, REL))
 
         end_time = time.time()
         print("Epoch %d: %.5f, Time is %.2fs" % (i, epoch_loss, end_time - start_time), flush=True)
         model.eval()
-        # 在 ner 的 evaluete中，加入 sdp 的 evaluate
-        dev_metrics = evaluate_model(config, model, dev_loader, "dev", dev_loader.dataset.insts)
-        test_metrics = evaluate_model(config, model, test_loader, "test", test_loader.dataset.insts)
+        # 在 ner 的 evaluete_model中，加入 sdp 的 evaluate 和 test
+        dev_metrics, dev_uas, dev_las = evaluate_model(config, model, dev_loader, "dev", dev_loader.dataset.insts)
+        if dev_uas !=0:
+            print ('SDP Dev data -- UAS: %.3f%%, LAS: %.3f%%, best_UAS: %.3f%%' % (dev_uas, dev_las, best_uas))
+        if dev_uas > best_uas:
+            best_uas = dev_uas
+        test_metrics, test_uas, test_las = evaluate_model(config, model, test_loader, "test", test_loader.dataset.insts)
+        if test_uas != 0:
+            print ('SDP Test data -- UAS: %.3f%%, LAS: %.3f%%' % (test_uas, test_las))
+        if test_best_uas < test_uas:
+            test_best_uas = test_uas
+        if test_best_las < test_las:
+            test_best_las = test_las
         if dev_metrics[2] > best_dev[0]:
             print("saving the best model...")
             no_incre_dev = 0
@@ -202,19 +213,36 @@ def evaluate_model(config: Config, model: TransformersCRF, data_loader: DataLoad
     ## evaluation
     p_dict, total_predict_dict, total_entity_dict = Counter(), Counter(), Counter()
     batch_size = data_loader.batch_size
+    all_arc_acc, all_rel_acc, all_arcs = 0, 0, 0
+    synuas, synlas = 0, 0
     with torch.no_grad():
         for batch_id, batch in tqdm(enumerate(data_loader, 0), desc="--evaluating batch", total=len(data_loader)):
             one_batch_insts = insts[batch_id * batch_size:(batch_id + 1) * batch_size]
-            # sdp 的 evaluate 需要加入到 model.decode中
-            batch_max_scores, batch_max_ids = model.decode(words= batch.input_ids.to(config.device),
-                    word_seq_lens = batch.word_seq_len.to(config.device),
-                    orig_to_tok_index = batch.orig_to_tok_index.to(config.device),
-                    input_mask = batch.attention_mask.to(config.device))
+            # sdp 的 evaluate 需要加入到 model.decode中, 且只是在有依存数据集的情况下才这么加，否则沿用默认NER评估
+            if config.mtlevlmode == 0:
+                batch_max_scores, batch_max_ids = model.decode(words= batch.input_ids.to(config.device),
+                        word_seq_lens = batch.word_seq_len.to(config.device),
+                        orig_to_tok_index = batch.orig_to_tok_index.to(config.device),
+                        input_mask = batch.attention_mask.to(config.device))
+            elif config.mtlevlmode == 1: # syntactic dependency parsing
+                batch_max_scores, batch_max_ids, arc_acc, rel_acc, total_arcs = \
+                    model.decode(words= batch.input_ids.to(config.device),
+                        word_seq_lens = batch.word_seq_len.to(config.device),
+                        orig_to_tok_index = batch.orig_to_tok_index.to(config.device),
+                        input_mask = batch.attention_mask.to(config.device),
+                        synhead_ids = batch.synhead_ids.to(config.device),
+                        synlabel_ids = batch.synlabel_ids.to(config.device))
+                all_arc_acc += arc_acc
+                all_rel_acc += rel_acc
+                all_arcs += total_arcs
             batch_p , batch_predict, batch_total = evaluate_batch_insts(one_batch_insts, batch_max_ids, batch.label_ids, batch.word_seq_len, config.idx2labels)
             p_dict += batch_p
             total_predict_dict += batch_predict
             total_entity_dict += batch_total
             batch_id += 1
+    if config.mtlevlmode == 1:
+        synuas = all_arc_acc * 100. / all_arcs
+        synlas = all_rel_acc * 100. / all_arcs
     f1Scores = []
     if print_each_type_metric or config.print_detail_f1 or (config.earlystop_atr == "macro"):
         for key in total_entity_dict:
@@ -233,7 +261,7 @@ def evaluate_model(config: Config, model: TransformersCRF, data_loader: DataLoad
     if config.earlystop_atr == "macro" and len(f1Scores) > 0:
         fscore = sum(f1Scores) / len(f1Scores)
 
-    return [precision, recall, fscore]
+    return [precision, recall, fscore], synuas, synlas
 
 def main():
     parser = argparse.ArgumentParser(description="LSTM CRF implementation")

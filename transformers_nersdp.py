@@ -8,6 +8,7 @@ import torch.nn as nn
 from module.bilstm_encoder import BiLSTMEncoder
 from module.linear_crf_inferencer import LinearCRF
 from module.linear_encoder import LinearEncoder
+from module.eisner import eisner
 from embedder.transformers_embedder import TransformersEmbedder
 from typing import Tuple
 from overrides import overrides
@@ -49,6 +50,7 @@ class TransformersCRF(nn.Module):
     def __init__(self, config):
         super(TransformersCRF, self).__init__()
         self.device = config.device
+        self.mtlevlmode = config.mtlevlmode
         # Embeddings
         self.embedder = TransformersEmbedder(transformer_model_name=config.embedder_type,
                                              parallel_embedder=config.parallel_embedder)
@@ -135,8 +137,8 @@ class TransformersCRF(nn.Module):
 
         rel_logit = self.rel_biaffine(x_rel_dep, x_rel_head)
         # cache
-        self.arc_logits = arc_logit
-        self.rel_logits = rel_logit
+        # self.arc_logits = arc_logit
+        # self.rel_logits = rel_logit
         # sdp loss
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
@@ -162,19 +164,57 @@ class TransformersCRF(nn.Module):
                     word_seq_lens: torch.Tensor,
                     orig_to_tok_index: torch.Tensor,
                     input_mask,
+                    synhead_ids: torch.Tensor=None, synlabel_ids: torch.Tenso=None,
                     **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Decode the batch input
         :param batchInput:
         :return:
         """
-
         word_rep = self.embedder(words, orig_to_tok_index, input_mask)
         lstm_features, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
-        # 这个地方加入 sdp 的 解析
-        features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
-        bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
-        return bestScores, decodeIdx
+        if self.mtlevlmode == 0:
+            features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
+            bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
+            return bestScores, decodeIdx
+        # 这个地方加入 sdp 的 解析 , baforward 的sdp内容搬进来
+        elif self.mtlevlmode == 1:
+            if self.training:
+                lstm_outputs = drop_sequence_sharedmask(lstm_features, self.dropout_mlp)
+            x_all_dep = self.mlp_arc_dep(lstm_outputs)
+            x_all_head = self.mlp_arc_head(lstm_outputs)
+            if self.training:
+                x_all_dep = drop_sequence_sharedmask(x_all_dep, self.dropout_mlp)
+                x_all_head = drop_sequence_sharedmask(x_all_head, self.dropout_mlp)
+
+            x_all_dep_splits = torch.split(x_all_dep, 100, dim=2)
+            x_all_head_splits = torch.split(x_all_head, 100, dim=2)
+
+            x_arc_dep = torch.cat(x_all_dep_splits[:self.arc_num], dim=2)
+            x_arc_head = torch.cat(x_all_head_splits[:self.arc_num], dim=2)
+
+            arc_logit = self.arc_biaffine(x_arc_dep, x_arc_head)
+            arc_logit = torch.squeeze(arc_logit, dim=3)
+
+            x_rel_dep = torch.cat(x_all_dep_splits[self.arc_num:], dim=2)
+            x_rel_head = torch.cat(x_all_head_splits[self.arc_num:], dim=2)
+
+            rel_logit = self.rel_biaffine(x_rel_dep, x_rel_head)
+            batch_size = word_rep.size(0)
+            sent_len = word_rep.size(1)
+
+            max_seq_len = max(word_seq_lens).item()
+            non_pad_mask = torch.zeros((batch_size, max_seq_len)).to(self.device)
+            non_pad_mask = non_pad_mask.byte()
+            num_rows, num_cols = synhead_ids.shape[0], synhead_ids.shape[1]
+            for i in range(num_rows):
+                a = synhead_ids[i, :]
+                non_pad_mask[i, :word_seq_lens[i].item()].fill_(1)
+            arc_acc, rel_acc, total_arcs = self.sdp_metric_evaluate(arc_logit, rel_logit, synhead_ids, synlabel_ids, non_pad_mask)
+
+            features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
+            bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
+            return bestScores, decodeIdx, arc_acc, rel_acc, total_arcs
 
     def cal_sdp_loss(self, pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask):
         '''
@@ -239,3 +279,48 @@ class TransformersCRF(nn.Module):
         rel_acc = masked_true_rels.eq(masked_pred_rels).sum().item()
 
         return arc_acc, rel_acc, total_arcs
+
+    def sdp_metric_evaluate(self, pred_arcs, pred_rels, true_heads, true_rels, non_pad_mask=None, punc_mask=None):
+        '''
+        :param pred_arcs: (bz, seq_len, seq_len)
+        :param pred_rels:  (bz, seq_len, seq_len, rel_size)
+        :param true_heads: (bz, seq_len)  包含padding
+        :param true_rels: (bz, seq_len)
+        :param non_pad_mask: (bz, seq_len)
+        :param punc_mask: (bz, seq_len)  含标点符号为1
+        if punc_mask is not None, we will omit punctuation
+        :return:
+        '''
+        non_pad_mask = non_pad_mask.byte()
+        non_pad_mask[:, 0] = 0  # mask out <root>
+        # 解码过程
+        pred_heads, pred_rels = self.sdp_decode(pred_arcs, pred_rels, non_pad_mask)
+
+        # 统计过程
+        non_punc_mask = (~punc_mask if punc_mask is not None else 1)
+        pred_heads_correct = (pred_heads == true_heads) * non_pad_mask * non_punc_mask
+        pred_rels_correct = (pred_rels == true_rels) * pred_heads_correct
+        arc_acc = pred_heads_correct.sum().item()
+        rel_acc = pred_rels_correct.sum().item()
+        total_arcs = (non_pad_mask * non_punc_mask).sum().item()
+
+        return arc_acc, rel_acc, total_arcs
+
+    def sdp_decode(self, pred_arc_score, pred_rel_score, mask):
+        '''
+        :param pred_arc_score: (bz, seq_len, seq_len)
+        :param pred_rel_score: (bz, seq_len, seq_len, rel_size)
+        :param mask: (bz, seq_len)  pad部分为0
+        :return: pred_heads (bz, seq_len)
+                 pred_rels (bz, seq_len)
+        '''
+        bz, seq_len, _ = pred_arc_score.size()
+        # pred_heads = mst_decode(pred_arc_score, mask)
+        # mask[:, 0] = 0  # mask out <root>
+        pred_heads = eisner(pred_arc_score, mask)
+        pred_rels = pred_rel_score.argmax(dim=-1)
+        # pred_rels = pred_rels.gather(dim=-1, index=pred_heads.unsqueeze(-1)).squeeze(-1)
+        pred_rels = pred_rels[torch.arange(bz, dtype=torch.long, device=pred_arc_score.device).unsqueeze(1),
+                              torch.arange(seq_len, dtype=torch.long, device=pred_arc_score.device).unsqueeze(0),
+                              pred_heads].contiguous()
+        return pred_heads, pred_rels
