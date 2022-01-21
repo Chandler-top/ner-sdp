@@ -131,15 +131,15 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
         start_time = time.time()
         model.zero_grad()
         model.train()
+        all_arc_acc, all_rel_acc, all_arcs = 0, 0, 0
         for iter, batch in tqdm(enumerate(train_loader, 1), desc="--training batch", total=len(train_loader)):
-            if iter == 227:
-                print ("error")
             optimizer.zero_grad()
             # 统一的loss 输出，同时这个地方要把heads，rels传输去做预测和损失计算
-            loss = model(words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
+            nerloss, sdploss, arc_acc, rel_acc, total_arcs = model(words = batch.input_ids.to(config.device), word_seq_lens = batch.word_seq_len.to(config.device),
                     orig_to_tok_index = batch.orig_to_tok_index.to(config.device), input_mask = batch.attention_mask.to(config.device),
                     synhead_ids = batch.synhead_ids.to(config.device), synlabel_ids = batch.synlabel_ids.to(config.device),
                     labels = batch.label_ids.to(config.device))
+            loss= nerloss + sdploss
             epoch_loss += loss.item()
             loss.backward()
             if config.max_grad_norm > 0:
@@ -148,6 +148,16 @@ def train_model(config: Config, epoch: int, train_loader: DataLoader, dev_loader
             optimizer.zero_grad()
             scheduler.step()
             model.zero_grad()
+
+            all_arc_acc += arc_acc
+            all_rel_acc += rel_acc
+            all_arcs += total_arcs
+
+            ARC = all_arc_acc * 100. / all_arcs
+            REL = all_rel_acc * 100. / all_arcs
+            print('batchsize ner train loss: %.2f, sdp train loss: %.2f, ARC: %.3f%%, REL: %.3f%% ' % (
+            nerloss.data.item(), sdploss.data.item(), ARC, REL))
+
         end_time = time.time()
         print("Epoch %d: %.5f, Time is %.2fs" % (i, epoch_loss, end_time - start_time), flush=True)
         model.eval()

@@ -141,16 +141,22 @@ class TransformersCRF(nn.Module):
         batch_size = word_rep.size(0)
         sent_len = word_rep.size(1)
 
-        _, _, no_pad_mask = self.compute_true_arc_rel(synhead_ids, synlabel_ids,
-                                                word_seq_lens, batch_size)
-        sdp_loss, _, _ = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,no_pad_mask)
+        max_seq_len = max(word_seq_lens).item()
+        non_pad_mask = torch.zeros((batch_size, max_seq_len)).to(self.device)
+        non_pad_mask = non_pad_mask.byte()
+        num_rows, num_cols = synhead_ids.shape[0], synhead_ids.shape[1]
+        for i in range(num_rows):
+            a = synhead_ids[i, :]
+            non_pad_mask[i, :word_seq_lens[i].item()].fill_(1)
+
+        sdp_loss, arc_acc, rel_acc, total_arcs = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,non_pad_mask)
 
         dev_num = word_rep.get_device()
         curr_dev = torch.device(f"cuda:{dev_num}") if dev_num >= 0 else torch.device("cpu")
         maskTemp = torch.arange(1, sent_len + 1, dtype=torch.long, device=curr_dev).view(1, sent_len).expand(batch_size, sent_len)
         mask = torch.le(maskTemp, word_seq_lens.view(batch_size, 1).expand(batch_size, sent_len))
         unlabed_score, labeled_score =  self.inferencer(lstm_scores, word_seq_lens, labels, mask)
-        return unlabed_score - labeled_score + sdp_loss
+        return unlabed_score - labeled_score, sdp_loss, arc_acc, rel_acc, total_arcs
 
     def decode(self, words: torch.Tensor,
                     word_seq_lens: torch.Tensor,
@@ -169,29 +175,6 @@ class TransformersCRF(nn.Module):
         features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
         bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
         return bestScores, decodeIdx
-
-    def compute_true_arc_rel(self, tensor_arcs, tensor_rels, word_seq_len, batch_size):
-        true_arcs = []
-        true_rels = []
-        max_seq_len = max(word_seq_len).item()
-        # true_arcs = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
-        # true_rels = torch.zeros((batch_size, max_seq_len), dtype=torch.long)
-
-        non_pad_mask = torch.zeros((batch_size, max_seq_len))
-        non_pad_mask = non_pad_mask.byte()
-
-        num_rows, num_cols = tensor_arcs.shape[0], tensor_arcs.shape[1]
-        for i in range(num_rows):
-            a = tensor_arcs[i, :]
-            # true_arcs.append(a[0:word_seq_len[i].item()].cpu().numpy())
-            non_pad_mask[i, :word_seq_len[i].item()].fill_(1)
-
-        # num_rows, num_cols = tensor_rels.shape[0], tensor_rels.shape[1]
-        # for i in range(num_rows):
-        #     a = tensor_rels[i, :]
-        #     true_rels.append(a[0:word_seq_len[i].item()].numpy())
-
-        return true_arcs, true_rels, non_pad_mask
 
     def cal_sdp_loss(self, pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask):
         '''
@@ -221,19 +204,9 @@ class TransformersCRF(nn.Module):
         # (bz*seq_len, rel_size)  (bz*seq_len, )
         rel_loss = F.cross_entropy(out_rels.reshape(-1, rel_size),
                                    masked_true_rels.reshape(-1))
-        # print("rel_loss:", rel_loss)
 
-
-        all_arc_acc, all_rel_acc, all_arcs = 0, 0, 0
         arc_acc, rel_acc, total_arcs = self.calc_sdp_acc(pred_arcs, pred_rels, true_arcs, true_rels, non_pad_mask)
-        all_arc_acc += arc_acc
-        all_rel_acc += rel_acc
-        all_arcs += total_arcs
-
-        ARC = all_arc_acc * 100. / all_arcs
-        REL = all_rel_acc * 100. / all_arcs
-        print('batchsize sdp train loss: %.2f, ARC: %.3f%%, REL: %.3f%% ' % ((arc_loss + rel_loss).data.item(), ARC, REL))
-        return arc_loss + rel_loss, ARC, REL
+        return arc_loss + rel_loss, arc_acc, rel_acc, total_arcs
 
     def calc_sdp_acc(self, pred_arcs, pred_rels, true_heads, true_rels, non_pad_mask=None):
         '''a
@@ -245,14 +218,14 @@ class TransformersCRF(nn.Module):
         :return:
         '''
         # non_pad_mask[:, 0] = 0  # mask out <root>
-        _mask = non_pad_mask.byte()
+        _mask = non_pad_mask.bool()
 
         bz, seq_len, seq_len, rel_size = pred_rels.size()
 
         # (bz, seq_len)
         pred_heads = pred_arcs.data.argmax(dim=2)
-        masked_pred_heads = pred_heads[_mask].bool()
-        masked_true_heads = true_heads[_mask].bool()
+        masked_pred_heads = pred_heads[_mask]
+        masked_true_heads = true_heads[_mask]
         arc_acc = masked_true_heads.eq(masked_pred_heads).sum().item()
 
         total_arcs = non_pad_mask.sum().item()
@@ -261,8 +234,8 @@ class TransformersCRF(nn.Module):
                              torch.arange(seq_len, device=pred_arcs.device, dtype=torch.long).unsqueeze(0),
                              true_heads].contiguous()
         pred_rels = out_rels.argmax(dim=2)
-        masked_pred_rels = pred_rels[_mask].bool()
-        masked_true_rels = true_rels[_mask].bool()
+        masked_pred_rels = pred_rels[_mask]
+        masked_true_rels = true_rels[_mask]
         rel_acc = masked_true_rels.eq(masked_pred_rels).sum().item()
 
         return arc_acc, rel_acc, total_arcs
