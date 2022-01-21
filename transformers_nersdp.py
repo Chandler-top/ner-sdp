@@ -148,7 +148,6 @@ class TransformersCRF(nn.Module):
         non_pad_mask = non_pad_mask.byte()
         num_rows, num_cols = synhead_ids.shape[0], synhead_ids.shape[1]
         for i in range(num_rows):
-            a = synhead_ids[i, :]
             non_pad_mask[i, :word_seq_lens[i].item()].fill_(1)
 
         sdp_loss, arc_acc, rel_acc, total_arcs = self.cal_sdp_loss(arc_logit,rel_logit,synhead_ids,synlabel_ids,non_pad_mask)
@@ -201,16 +200,16 @@ class TransformersCRF(nn.Module):
             x_rel_head = torch.cat(x_all_head_splits[self.arc_num:], dim=2)
 
             rel_logit = self.rel_biaffine(x_rel_dep, x_rel_head)
+
             batch_size = word_rep.size(0)
-            sent_len = word_rep.size(1)
 
             max_seq_len = max(word_seq_lens).item()
             non_pad_mask = torch.zeros((batch_size, max_seq_len)).to(self.device)
             non_pad_mask = non_pad_mask.byte()
             num_rows, num_cols = synhead_ids.shape[0], synhead_ids.shape[1]
             for i in range(num_rows):
-                a = synhead_ids[i, :]
                 non_pad_mask[i, :word_seq_lens[i].item()].fill_(1)
+            print ("non_pad_mask in:", non_pad_mask)
             arc_acc, rel_acc, total_arcs = self.sdp_metric_evaluate(arc_logit, rel_logit, synhead_ids, synlabel_ids, non_pad_mask)
 
             features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
@@ -294,6 +293,7 @@ class TransformersCRF(nn.Module):
         '''
         non_pad_mask = non_pad_mask.byte()
         non_pad_mask[:, 0] = 0  # mask out <root>
+        print (non_pad_mask)
         # 解码过程
         pred_heads, pred_rels = self.sdp_decode(pred_arcs, pred_rels, non_pad_mask)
 
