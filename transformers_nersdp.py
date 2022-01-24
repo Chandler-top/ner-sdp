@@ -171,21 +171,16 @@ class TransformersCRF(nn.Module):
         :return:
         """
         word_rep = self.embedder(words, orig_to_tok_index, input_mask)
-        lstm_features, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
-        lstm_outputs = lstm_features
+        lstm_outputs, recover_idx = self.lstmencoder(word_rep, word_seq_lens)
+
         if self.mtlevlmode == 0:
-            features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
+            features = self.linencoder(word_rep, word_seq_lens, lstm_outputs, recover_idx)
             bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
             return bestScores, decodeIdx
         # 这个地方加入 sdp 的 解析 , baforward 的sdp内容搬进来
         elif self.mtlevlmode == 1:
-            if self.training:
-                lstm_outputs = drop_sequence_sharedmask(lstm_features, self.dropout_mlp)
             x_all_dep = self.mlp_arc_dep(lstm_outputs)
             x_all_head = self.mlp_arc_head(lstm_outputs)
-            if self.training:
-                x_all_dep = drop_sequence_sharedmask(x_all_dep, self.dropout_mlp)
-                x_all_head = drop_sequence_sharedmask(x_all_head, self.dropout_mlp)
 
             x_all_dep_splits = torch.split(x_all_dep, 100, dim=2)
             x_all_head_splits = torch.split(x_all_head, 100, dim=2)
@@ -209,10 +204,9 @@ class TransformersCRF(nn.Module):
             num_rows, num_cols = synhead_ids.shape[0], synhead_ids.shape[1]
             for i in range(num_rows):
                 non_pad_mask[i, :word_seq_lens[i].item()].fill_(1)
-            print ("non_pad_mask in:", non_pad_mask)
             arc_acc, rel_acc, total_arcs = self.sdp_metric_evaluate(arc_logit, rel_logit, synhead_ids, synlabel_ids, non_pad_mask)
 
-            features = self.linencoder(word_rep, word_seq_lens, lstm_features, recover_idx)
+            features = self.linencoder(word_rep, word_seq_lens, lstm_outputs, recover_idx)
             bestScores, decodeIdx = self.inferencer.decode(features, word_seq_lens)
             return bestScores, decodeIdx, arc_acc, rel_acc, total_arcs
 
@@ -293,7 +287,6 @@ class TransformersCRF(nn.Module):
         '''
         non_pad_mask = non_pad_mask.byte()
         non_pad_mask[:, 0] = 0  # mask out <root>
-        print (non_pad_mask)
         # 解码过程
         pred_heads, pred_rels = self.sdp_decode(pred_arcs, pred_rels, non_pad_mask)
 

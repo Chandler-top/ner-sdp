@@ -34,10 +34,10 @@ def set_seed(opt, seed):
 
 def parse_arguments(parser):
     ###Training Hyperparameters
-    parser.add_argument('--device', type=str, default="cpu", help="GPU/CPU devices")
+    parser.add_argument('--device', type=str, default="cuda", help="GPU/CPU devices")
     parser.add_argument('--seed', type=int, default=42, help="random seed")
     parser.add_argument('--dataset', type=str, default="ontonotes")
-    parser.add_argument('--mtlevlmode', type=int, default="0", choices=[0, 1, 2, 3],
+    parser.add_argument('--mtlevlmode', type=int, default="1", choices=[0, 1, 2, 3],
                         help="multitask evaluate and test mode, 0 means ner without dp data. 1 means ner with syntactic dp data. "
                              "2 means ner with semantic dp data. 3 means ner with syntactic and semantic dp data.")
     parser.add_argument('--optimizer', type=str, default="adamw",
@@ -47,7 +47,7 @@ def parse_arguments(parser):
     parser.add_argument('--momentum', type=float, default=0.0)
     parser.add_argument('--l2', type=float, default=1e-8)
     parser.add_argument('--lr_decay', type=float, default=0)
-    parser.add_argument('--batch_size', type=int, default=10,
+    parser.add_argument('--batch_size', type=int, default=20,
                         help="default batch size is 30 (works well for normal neural crf), here default 30 for bert-based crf")
     parser.add_argument('--num_epochs', type=int, default=200, help="Usually we set to 100.")
     parser.add_argument('--train_num', type=int, default=-1, help="-1 means all the data")

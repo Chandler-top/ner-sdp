@@ -159,11 +159,17 @@ class TransformersNERDataset(Dataset):
 
         with open(file, 'r', encoding='utf-8') as f:
             words = []
+            words.append('<root>')
             ori_words = []
+            ori_words.append('<root>')
             tags = []
+            tags.append('root')
             synheads = []
+            synheads.append(0)
             syndeps = []
+            syndeps.append('root')
             labels = []
+            labels.append('O')
             find_root = False
 
             for line in tqdm(f.readlines()):
@@ -252,7 +258,7 @@ class TransformersNERDataset(Dataset):
 if __name__ == '__main__':
     from transformers import RobertaTokenizerFast
     tokenizer = RobertaTokenizerFast.from_pretrained('roberta-base', add_prefix_space=True)
-    dataset = TransformersNERDataset(file= "data/ontonotes/train.txt",tokenizer=tokenizer, is_train=True)
+    dataset = TransformersNERDataset(file= "data/ontonotes-samples/train.txt",tokenizer=tokenizer, is_train=True)
     from torch.utils.data import DataLoader
     train_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=0, collate_fn=dataset.collate_fn)
     print (len(train_dataloader))
